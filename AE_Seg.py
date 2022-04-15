@@ -11,7 +11,7 @@ else:
     tf.disable_v2_behavior()
     import tensorflow.compat.v1.gfile as gfile
 print(tf.__version__)
-sys.path.append(r'G:\我的雲端硬碟\Python\Code\Pycharm\utility')
+# sys.path.append(r'G:\我的雲端硬碟\Python\Code\Pycharm\utility')
 from Utility import tools,file_transfer,file_decode_v2,Seg_performance,get_classname_id_color
 from models_AE import AE_transpose_4layer,tf_mish,AE_JNet,AE_Resnet_Rot,AE_pooling_net,\
     AE_Unet,Seg_DifNet,AE_Seg_pooling_net,preprocess

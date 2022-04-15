@@ -1,4 +1,4 @@
-import os,math,cv2,json,imgviz,shutil,uuid,PIL,time
+import os,math,cv2,json,imgviz,time
 import numpy as np
 import tensorflow
 import matplotlib.pyplot as plt
@@ -308,10 +308,24 @@ def recon_seg_prediction(img_dir,pb_path,node_dict,to_save_predict_image=False,c
     titles = ['prediction', 'answer']
     batch_size = 1
     undetected_list = []
+    contour_cc_differ = list()
+
 
     # paths, json_paths, qty = tf_tl.get_subdir_paths_withJsonCheck(img_dir)
-    paths, qty = tf_tl.get_paths(img_dir)
-    json_paths = tf_tl.get_relative_json_files(paths)
+    if isinstance(img_dir,list):
+        paths = list()
+        json_paths = list()
+        qty = 0
+        for dir_path in img_dir:
+            paths_temp, qty_temp = tf_tl.get_paths(dir_path)
+            json_paths_temp = tf_tl.get_relative_json_files(paths_temp)
+            if qty_temp > 0:
+                paths.extend(paths_temp.tolist())
+                json_paths.extend(json_paths_temp.tolist())
+                qty += qty_temp
+    else:
+        paths, qty = tf_tl.get_paths(img_dir)
+        json_paths = tf_tl.get_relative_json_files(paths)
 
     msg = "SEG圖片數量:{}".format(qty)
     say_sth(msg, print_out=True)
@@ -321,7 +335,10 @@ def recon_seg_prediction(img_dir,pb_path,node_dict,to_save_predict_image=False,c
         say_sth(msg, print_out=True)
     else:
         #----create save dir
-        save_dir = os.path.join(img_dir, pb_path.split("\\")[-2])
+        if isinstance(img_dir,list):
+            save_dir = os.path.join(img_dir[0], pb_path.split("\\")[-2])
+        else:
+            save_dir = os.path.join(img_dir, pb_path.split("\\")[-2])
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         save_dir4defect_undetected = os.path.join(save_dir, 'defect_undetected')
@@ -385,9 +402,11 @@ def recon_seg_prediction(img_dir,pb_path,node_dict,to_save_predict_image=False,c
             seg_p.cal_intersection_union(predict_label, batch_label)
 
             #----calculate defect by accuracy
-            t_list = seg_p.cal_defect_by_acc(predict_label, batch_label, paths=batch_paths, id2color=id2color)
+            t_list, contour_cc_differ_temp= seg_p.cal_defect_by_acc(predict_label, batch_label, paths=batch_paths, id2color=id2color)
+            contour_cc_differ.extend(contour_cc_differ_temp)
             if len(t_list):
                 undetected_list.extend(t_list)
+
 
             batch_data *= 255
             batch_data = batch_data.astype(np.uint8)
@@ -447,6 +466,7 @@ def recon_seg_prediction(img_dir,pb_path,node_dict,to_save_predict_image=False,c
         #----statistics
         iou, acc, all_acc = seg_p.cal_iou_acc()
         defect_recall = seg_p.cal_defect_recall()
+        # contour_cc_differ = np.array(contour_cc_differ)
 
         #----save the log
         save_log(save_dir,'log.json',img_dir=img_dir,pb_path=pb_path,node_dict=node_dict,
@@ -462,11 +482,14 @@ def recon_seg_prediction(img_dir,pb_path,node_dict,to_save_predict_image=False,c
         print("all_acc:", all_acc)
         print("defect stat:", seg_p.defect_stat)
         print("defect recall:", defect_recall)
+
+        # print("len of contour_cc_differ:", len(contour_cc_differ))
+        # print('average error pixels:', np.average(contour_cc_differ))
+        # print("std of average error pixels:", np.std(contour_cc_differ))
 def save_log(save_dir,save_filename,**kwargs):
     save_path = os.path.join(save_dir, save_filename)
     with open(save_path, 'w') as f:
         json.dump(kwargs, f)
-
 
 class tf_utility(tools):
     def __init__(self):
@@ -581,9 +604,14 @@ class tf_utility(tools):
 
 
 if __name__ == "__main__":
-    img_dir = r'D:\dataset\optotech\silicon_division\PDAP\藥水殘(原圖+color圖+json檔)\L2_potion\test'
+    # img_dir = r'D:\dataset\optotech\silicon_division\PDAP\藥水殘(原圖+color圖+json檔)\L2_potion\test'
     # img_dir = r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test'
-    pb_path = r"D:\code\model_saver\AE_Seg_22\pb_model.pb"
+    img_dir = [
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
+        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2",
+    ]
+    # pb_path = r"D:\code\model_saver\AE_Seg_20\pb_model.pb"
+    pb_path = r"D:\code\model_saver\AE_Seg_21\infer_best_epoch288.pb"
     node_dict = {'input': 'input:0',
                  'recon':'output_AE:0',
                  'input_recon':'input_recon:0',
@@ -591,9 +619,9 @@ if __name__ == "__main__":
                  }
 
     recon_seg_prediction(img_dir, pb_path, node_dict,
-                         to_save_predict_image=True,
-                         compare_with_label=True,
-                         to_save_defect_undetected=False,
+                         to_save_predict_image=False,
+                         compare_with_label=False,
+                         to_save_defect_undetected=True,
                          acc_threshold=0.3
                          )
 

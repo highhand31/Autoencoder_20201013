@@ -91,6 +91,8 @@ class Seg_performance():
         count = 0
         h,w = batch_label.shape[1:]
         undetected_list = list()
+        contour_cc_differ = list()
+
 
         for predict,label in zip(batch_predict,batch_label):
 
@@ -98,14 +100,17 @@ class Seg_performance():
             # cc_t = time.time()
             label_nums, label_map, stats, centroids = cv2.connectedComponentsWithStats(label, connectivity=8)
             #----contour test(contour算的面積會跟連通算的不一樣)
-            # contours, hierarchy = cv2.findContours(label,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
-            # for i in range(len(contours)):
-            #     print("contour area:",cv2.contourArea(contours[i]))
-
+            contours, hierarchy = cv2.findContours(label,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+            contour_qty = 0
+            for i in range(len(contours)):
+                qty_temp = cv2.contourArea(contours[i]) + len(contours[i])
+                contour_qty += qty_temp
+                # print("contour area:",qty_temp)
 
             # print("label_nums:{},contour number:{}".format(label_nums,len(contours)))
             intersect = (predict == label)
             zeros = np.zeros_like(label).astype('bool')
+            cc_qty = 0
             for label_num in range(0, label_nums):
                 s = stats[label_num]
                 # if label_num != 0:
@@ -114,9 +119,9 @@ class Seg_performance():
                 logi_and = np.logical_and(zeros, intersect)
                 sum_logi_and = np.sum(logi_and)
                 acc_t = sum_logi_and / s[-1]
-                # print("acc:",acc)
-                # print(label[coors])
-                print("CC area:",s[-1])
+                if label_num > 0:
+                    cc_qty += s[-1]
+                    # print("CC area:",s[-1])
                 defect_class = label[coors][0]
                 self.defect_stat[defect_class][0] += 1
                 if acc_t >= self.acc_threshold:
@@ -152,8 +157,14 @@ class Seg_performance():
                 zeros[coors] = False
 
             count += 1
+            contour_cc_differ.append(np.abs(cc_qty - contour_qty))
 
-        return undetected_list
+        #contour_cc_differ = np.array(contour_cc_differ)
+        # print("len of contour_cc_differ:",len(contour_cc_differ))
+        # print('average error rate:',np.average(contour_cc_differ))
+        # print("std of average error rate:",np.std(contour_cc_differ))
+
+        return undetected_list,contour_cc_differ
 
     def reset_arg(self,):
         a = np.zeros((self.num_classes,), dtype=float)
@@ -471,6 +482,7 @@ class tools():
             # ins_id = instances.index(instance) + 1
             cls_id = label_name_to_value[label]
 
+
             mask = self.shape_to_mask(img_shape[:2], points, shape_type)
             cls[mask] = cls_id
             # ins[mask] = ins_id
@@ -645,11 +657,14 @@ class tools():
                         label_shapes = self.get_label_shapes(json_path)
                         if label_shapes is None:
                             continue
-                        lbl = self.shapes_to_label(
-                            img_shape=img.shape,
-                            shapes=label_shapes,
-                            label_name_to_value=self.class_name2id,
-                        )
+                        try:
+                            lbl = self.shapes_to_label(
+                                img_shape=img.shape,
+                                shapes=label_shapes,
+                                label_name_to_value=self.class_name2id,
+                            )
+                        except:
+                            print("label Error:",json_path)
 
 
                     if to_save_label is True:
@@ -2329,8 +2344,8 @@ if __name__ == "__main__":
     # img_mask(img_source, json_path,zoom_in_value=[75,77,88,88], img_type='path')
 
     #----check results
-    dir_path = r"D:\code\model_saver\AE_Seg_22"
-    check_results(dir_path, encript_flag=False,epoch_range=None)
+    dir_path = r"D:\code\model_saver\AE_Seg_20"
+    check_results(dir_path, encript_flag=False,epoch_range=[15,300])
 
     #----get_paths_labels
     # img_dir = r"C:\Users\User\Desktop\file_test"

@@ -961,71 +961,79 @@ class AE():
                 say_sth('AI Engine結束!!期待下次再相見', print_out=print_out, header='AIE_end')
 
     #----functions
-    def config_check(self,config_dict):
-        #----var
+    def config_check(self, config_dict):
+        # ----var
         must_list = ['train_img_dir', 'model_name', 'save_dir', 'epochs']
         # must_list = ['train_img_dir', 'test_img_dir', 'save_dir', 'epochs']
         must_flag = True
-        default_dict = {"model_shape":[None,192,192,3],
-                        'model_name':"type_1_0",
-                        'loss_method':'ssim',
-                        'activation':'relu',
-                        'save_pb_name':'inference',
-                        'opti_method':'adam',
-                        'pool_type':['max', 'ave'],
-                        'pool_kernel':[7, 2],
-                        'embed_length':144,
-                        'learning_rate':1e-4,
-                        'batch_size':8,
-                        'ratio':1.0,
-                        'aug_times':2,
-                        'hit_target_times':2,
-                        'eval_epochs':2,
-                        'save_period':2,
-                        'kernel_list':[7,5,3,3,3],
-                        'filter_list':[32,64,96,128,256],
-                        'conv_time':1,
-                        'rot':False,
-                        'scaler':1,
-                        #'preprocess_dict':{'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
+        default_dict = {"model_shape": [None, 192, 192, 3],
+                        'model_name': "type_1_0",
+                        'loss_method': 'ssim',
+                        'activation': 'relu',
+                        'save_pb_name': 'inference',
+                        'opti_method': 'adam',
+                        'pool_type': ['max', 'ave'],
+                        'pool_kernel': [7, 2],
+                        'embed_length': 144,
+                        'learning_rate': 1e-4,
+                        'batch_size': 8,
+                        'ratio': 1.0,
+                        'aug_times': 2,
+                        'hit_target_times': 2,
+                        'eval_epochs': 2,
+                        'save_period': 2,
+                        'kernel_list': [7, 5, 3, 3, 3],
+                        'filter_list': [32, 64, 96, 128, 256],
+                        'conv_time': 1,
+                        'rot': False,
+                        'scaler': 1,
+                        'dtype': 'float32',
+                        'process_dict': {"rdm_flip": True, 'rdm_br': True, 'rdm_blur': True,
+                                         'rdm_angle': True,
+                                         'rdm_noise': False,
+                                         'rdm_shift': True,
+                                         'rdm_patch': True,
+                                         },
+                        'setting_dict': {'rdm_shift': 0.1, 'rdm_angle': 10, 'rdm_patch': [0.25, 0.3, 10]},
+                        # rdm_patch:[margin_ratio,patch_ratio,size_min]
+                        'show_data_qty': True
                         }
 
-
-        #----get the must list
+        # ----get the must list
         if config_dict.get('must_list') is not None:
             must_list = config_dict.get('must_list')
-        #----collect all keys of config_dict
+        # ----collect all keys of config_dict
         config_key_list = list(config_dict.keys())
 
-        #----check the must list
+        # ----check the must list
         if config_dict.get("J_mode") is not True:
 
-            #----check of must items
+            # ----check of must items
             for item in must_list:
                 if not item in config_key_list:
                     msg = "Error: could you plz give me parameters -> {}".format(item)
-                    say_sth(msg,print_out=print_out)
+                    say_sth(msg, print_out=print_out)
                     if must_flag is True:
                         must_flag = False
 
-        #----parameters parsing
+        # ----parameters parsing
         if must_flag is True:
-            #----model name
+            # ----model name
             if config_dict.get("J_mode") is not True:
                 infer_num = config_dict['model_name'].split("_")[-1]
-                if infer_num == '0':#
+                if infer_num == '0':  #
                     config_dict['infer_method'] = "AE_pooling_net"
-                elif infer_num == '1':#
+                elif infer_num == '1':  #
                     config_dict['infer_method'] = "AE_Unet"
                 else:
                     config_dict['infer_method'] = "AE_transpose_4layer"
 
-            #----optional parameters
-            for key,value in default_dict.items():
+            # ----optional parameters
+            for key, value in default_dict.items():
                 if not key in config_key_list:
                     config_dict[key] = value
 
-        return must_flag,config_dict
+        return must_flag, config_dict
 
     def __img_patch_diff_method(self,img_source_1, img_source_2, sess,diff_th=30, cc_th=30):
 
