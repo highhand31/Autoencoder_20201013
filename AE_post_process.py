@@ -235,6 +235,8 @@ def recon_pixel_comparison(img_dir, pb_path, diff_th, cc_th,**kwargs):
     save_dir = kwargs.get('save_dir')
     mask_json_path = kwargs.get('mask_json_path')
     to_mask = kwargs.get('to_mask')
+    batch_size = kwargs.get('batch_size')
+
 
     d_t = time.time()
 

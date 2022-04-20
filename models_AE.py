@@ -1,6 +1,7 @@
 import tensorflow
 # from inception_resnet_v1_reduction import inference as inception_resnet_v1_reduction
 import numpy as np
+from models_VIT import PatchEmbedding,VitLayer,VitLayer_2
 
 
 #----tensorflow version check
@@ -549,7 +550,7 @@ def re_conv4unet(tf_input, kernel_list, filter_list,pool_kernel=2,activation=tf.
     return net,conv_list
 
 def re_conv(tf_input, kernel_list, filter_list,pool_kernel=2,activation=tf.nn.relu,pool_type=None,rot=False,
-            print_out=False):
+            stride_list=None,print_out=False):
     #----var
     pool_kernel = [1, pool_kernel, pool_kernel, 1]
     msg_list = list()
@@ -594,10 +595,14 @@ def re_conv(tf_input, kernel_list, filter_list,pool_kernel=2,activation=tf.nn.re
 
         #----pooling
         if pool_type is not None:
-            if pool_type == 'cnn':
-                net = Conv(net, filter_list[i], kernel=pool_kernel[1:3],stride=2,activation=activation)
+            if isinstance(stride_list,list):
+                stride = stride_list[i]
             else:
-                net = tf_pool(net, ksize=pool_kernel, strides=[1, 2, 2, 1], padding='SAME')
+                stride = 2
+            if pool_type == 'cnn':
+                net = Conv(net, filter_list[i], kernel=pool_kernel[1:3],stride=stride,activation=activation)
+            else:
+                net = tf_pool(net, ksize=pool_kernel, strides=[1, stride, stride, 1], padding='SAME')
 
 
         msg = "encode_{} shape = {}".format(i + 1, net.shape)
@@ -606,6 +611,58 @@ def re_conv(tf_input, kernel_list, filter_list,pool_kernel=2,activation=tf.nn.re
 
     #----display
     say_sth(msg_list,print_out=print_out)
+
+    return net
+
+def cnn_transformer(tf_input, kernel_list, filter_list,stride_list,pool_kernel=2,drop_rate=0.2,activation=tf.nn.relu,
+                    pool_type=None,to_Vit=False,print_out=False):
+
+    #----var
+    pool_kernel = [1, pool_kernel, pool_kernel, 1]
+    msg_list = list()
+
+    #----pool process
+    if pool_type is not None:
+        if pool_type == 'max':
+            tf_pool = tf.nn.max_pool
+        elif pool_type == 'ave':
+            tf_pool = tf.nn.avg_pool
+        elif pool_type == 'cnn':
+            pass
+        else:
+            pool_type = None
+
+    msg = '----Repeat CNN_transformer with pool type {}, kernel {}----'.format(pool_type, pool_kernel[1])
+    msg_list.append(msg)
+
+    #----repeat CNN_transformer
+    for i in range(len(filter_list)):
+        if i == 0:
+            data_input = tf_input
+        else:
+            data_input = net
+
+        net = Conv(data_input, filter_list[i], kernel=kernel_list[i], activation=activation)
+        #----down sampling
+        if pool_type is not None:
+            if pool_type == 'cnn':
+                net = Conv(net, filter_list[i], kernel=pool_kernel[1:3], stride=stride_list[i], activation=activation)
+            else:
+                net = tf_pool(net, ksize=pool_kernel, strides=[1, 2, 2, 1], padding='SAME')
+            msg = "CNN encode_{} shape = {}".format(i + 1, net.shape)
+            msg_list.append(msg)
+        #----transformer
+        if to_Vit is True:
+            patch_size = [stride_list[i],stride_list[i]]
+            net_trans = VitLayer_2(data_input,hidden_size=filter_list[i],patch_size=patch_size,drop_rate=drop_rate)
+            msg = "transformer encode_{} shape = {}".format(i + 1, net_trans.shape)
+            msg_list.append(msg)
+
+            #----concat
+            net = v2.concat([net,net_trans],axis=-1)
+
+    # ----display
+    say_sth(msg_list, print_out=print_out)
 
     return net
 
@@ -729,7 +786,7 @@ def AE_Seg_net(tf_input, kernel_list, filter_list, pool_kernel_list=2, activatio
     return net
 
 def AE_pooling_net(tf_input, kernel_list, filter_list,pool_kernel_list=2,activation=tf.nn.relu,
-                   pool_type_list=None,rot=False,print_out=False,preprocess_dict=None):
+                   pool_type_list=None,stride_list=None,rot=False,print_out=False,preprocess_dict=None):
     #----var
     net_list = list()
     transpose_list = list()
@@ -751,7 +808,7 @@ def AE_pooling_net(tf_input, kernel_list, filter_list,pool_kernel_list=2,activat
     # with tf.variable_scope("AE",reuse=tf.AUTO_REUSE):
     for i,pool_type in enumerate(pool_type_list):
         net = re_conv(tf_input, kernel_list, filter_list, pool_kernel=pool_kernel_list[i], pool_type=pool_type,
-                      activation=tf.nn.relu,rot=rot,print_out=print_out)
+                      stride_list=stride_list,activation=tf.nn.relu,rot=rot,print_out=print_out)
         net_list.append(net)
 
     net = tf.concat(net_list,axis=-1)
@@ -770,7 +827,11 @@ def AE_pooling_net(tf_input, kernel_list, filter_list,pool_kernel_list=2,activat
     for net in net_list:
         for i, filers in enumerate(filter_list[::-1]):
             kernel = kernel_list[::-1][i]
-            decode = tf.layers.conv2d_transpose(net, filers, transpose_filter, strides=2, padding='same')
+            if isinstance(stride_list,list):
+                stride = stride_list[::-1][i]
+            else:
+                stride = 2
+            decode = tf.layers.conv2d_transpose(net, filers, transpose_filter, strides=stride, padding='same')
 
             net = Conv(decode, filers, kernel=kernel, activation=activation)
             if rot is True:
@@ -793,7 +854,154 @@ def AE_pooling_net(tf_input, kernel_list, filter_list,pool_kernel_list=2,activat
     say_sth(msg_list,print_out=print_out)
 
     return net
+def AE_pooling_net_V2(tf_input, kernel_list, filter_list,stride_list,pool_kernel_list=2,activation=tf.nn.relu,
+                   pool_type_list=None,to_Vit=False,print_out=False):
+    #----var
+    net_list = list()
+    transpose_list = list()
+    transpose_filter = [1, 1]
+    msg_list = list()
 
+    #----filters vs pooling times
+    pool_times = len(pool_type_list)
+    filter_list = np.array(filter_list) // pool_times
+
+    #----filters vs rot cnn
+    if to_Vit is True:
+        filter_list = filter_list // 2
+
+    #----preprocess
+    # if preprocess_dict is not None:
+    #     tf_input = preprocess(tf_input,preprocess_dict,print_out=print_out)
+
+    # with tf.variable_scope("AE",reuse=tf.AUTO_REUSE):
+    for i,pool_type in enumerate(pool_type_list):
+        net = cnn_transformer(tf_input, kernel_list, filter_list,stride_list, pool_kernel=pool_kernel_list[i],
+                              pool_type=pool_type,activation=tf.nn.relu,to_Vit=to_Vit,print_out=print_out)
+
+        net_list.append(net)
+
+    #net = tf.concat(net_list,axis=-1)
+
+     # net = tf.concat(net_list,axis=-1)
+
+    # pre_embeddings = tf.layers.flatten(net, name='pre_embeddings')
+    # embeddings = tf.nn.l2_normalize(pre_embeddings, 1, 1e-10, name='embeddings')
+    # msg = "embeddings shape:{}".format(embeddings.shape)
+    # msg_list.append(msg)
+
+    # -----------------------------------------------------------------------
+    # --------Decode--------
+    # -----------------------------------------------------------------------
+
+    for net in net_list:
+        for i, filers in enumerate(filter_list[::-1]):
+            kernel = kernel_list[::-1][i]
+            decode = tf.layers.conv2d_transpose(net, filers, transpose_filter, strides=2, padding='same')
+
+            net = Conv(decode, filers, kernel=kernel, activation=activation)
+
+            msg = "decode_{} shape = {}".format(i + 1, net.shape)
+            msg_list.append(msg)
+        transpose_list.append(net)
+
+    concat = tf.concat(transpose_list, axis=-1)
+    net = Conv(concat, filers, kernel=kernel, activation=activation)
+
+
+    # net = Conv(net, 3, kernel=kernel_list[0], padding="same", activation=activation, name='output_AE')
+    net = Conv(net, 3, kernel=kernel_list[0], padding="same", activation=None)#name='output_AE'
+
+    say_sth(msg_list,print_out=print_out)
+
+    return net
+
+def AE_VIT(tf_input, kernel_list, filter_list,pool_kernel_list=2,activation=tf.nn.relu,
+                   pool_type_list=None,rot=False,print_out=False,preprocess_dict=None):
+    # ----var
+    net_list = list()
+    transpose_list = list()
+    transpose_filter = [1, 1]
+    msg_list = list()
+
+    # ----filters vs pooling times
+    pool_times = len(pool_type_list)
+    filter_list = np.array(filter_list) // pool_times
+
+    # ----filters vs rot cnn
+    if rot is True:
+        filter_list = filter_list // 2
+    image_size = [tf_input.shape[1].value,tf_input.shape[2].value]
+    patch_size = [32,32]
+    hidden_size = 128
+    layer = VitLayer(hidden_size=hidden_size)
+
+    patch_embedding = PatchEmbedding(image_size=image_size,patch_size=patch_size,num_channel=3,embed_length=hidden_size)
+    net = patch_embedding(tf_input)
+    # net = Conv(tf_input,hidden_size, kernel=[patch_size,patch_size],stride=patch_size, activation=None)
+    # print("net shape:{}".format(net.shape))
+    # seq_len = (tf_input.shape[1].value // patch_size) * ((tf_input.shape[2].value // patch_size))
+    # net = tf.reshape(net, [-1, seq_len, hidden_size])
+    print("patch_embedding shape:{}".format(net.shape))
+
+    net = layer(net)
+    net = layer(net)
+    net = layer(net)
+
+    sqrt_value = int(np.sqrt(net.shape[1].value))
+    net = v2.reshape(net,[-1,sqrt_value,sqrt_value,hidden_size])
+
+    # net_norm = layernorm1(net)
+    #
+    # key = tf.layers.dense(inputs=net_norm, units=hidden_size, activation=None)
+    # query = tf.layers.dense(inputs=net_norm, units=hidden_size, activation=None)
+    # value = tf.layers.dense(inputs=net_norm, units=hidden_size, activation=None)
+    # print("key shape:{}".format(key.shape))
+    #
+    # attention_scores = tf.matmul(query,key,transpose_b=True)
+    # print("attention_scores shape:{}".format(attention_scores.shape))
+    #
+    # attention_probs = tf.nn.softmax(attention_scores,axis=-1)
+    #
+    # context_layer = tf.matmul(attention_probs, value)
+    # print("context_layer shape:{}".format(context_layer.shape))
+    #
+    # net += context_layer
+    #
+    # net_norm = layernorm2(net)
+    #
+    # net_norm = tf.layers.dense(inputs=net_norm, units=hidden_size, activation=v2.nn.gelu)
+    #
+    # net += net_norm
+    print("net shape:{}".format(net.shape))
+
+    pre_embeddings = tf.layers.flatten(net, name='pre_embeddings')
+    embeddings = tf.nn.l2_normalize(pre_embeddings, 1, 1e-10, name='embeddings')
+
+    net_list = [net,net]
+
+
+
+    for net in net_list:
+        for i, filers in enumerate(filter_list[::-1]):
+            kernel = kernel_list[::-1][i]
+            decode = tf.layers.conv2d_transpose(net, filers, transpose_filter, strides=2, padding='same')
+
+            net = Conv(decode, filers, kernel=kernel, activation=activation)
+            if rot is True:
+                net_1 = rot_cnn(decode, filers, kernel, activation=activation)
+                net = tf.concat([net, net_1], axis=-1)
+
+            msg = "decode_{} shape = {}".format(i + 1, net.shape)
+            msg_list.append(msg)
+        transpose_list.append(net)
+
+    concat = tf.concat(transpose_list, axis=-1)
+    net = Conv(concat, filers, kernel=kernel, activation=activation)
+    net = Conv(net, 3, kernel=kernel_list[0], padding="same", activation=None)  # name='output_AE'
+    say_sth(msg_list, print_out=print_out)
+
+    return net
 def AE_Seg_pooling_net(tf_input, kernel_list, filter_list,pool_kernel_list=2,activation=tf.nn.relu,
                    pool_type_list=None,rot=False,print_out=False,preprocess_dict=None,class_num=3):
     #----var
@@ -1620,3 +1828,4 @@ def rot_cnn(net,filters,kernel,stride=1,activation=tf.nn.relu,padding='same',nam
                activation=activation, stride=stride, padding=padding,name=name)
     net_rot = v2.image.rot90(net_rot, k=-1)
     return net_rot
+

@@ -212,6 +212,10 @@ class tools():
         ]
         self.print_out = print_out
 
+        #----
+        img_dir = r"D:\dataset\nature\natural_images\flower"
+        self.paths_flower = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in img_format]
+
     def get_paths(self,img_source):
         # ----var
         paths = list()
@@ -965,6 +969,11 @@ class tools():
                                         cv2.rectangle(img, (center_x, center_y),
                                                       (center_x + lens[0], center_y + lens[1]),
                                                       color, -1)
+                    # if self.p_dict.get('rdm_patch'):
+                    #     img = cv2.resize(img, (output_shape[1], output_shape[0]))
+                    #     # mask,img_back = self.get_perlin_noise(output_shape[:-1],res=(16,16))
+                    #     img = self.add_noise_by_perlin(img,res=(32,32))
+
 
                 #----resize and change the color format
                 img = cv2.resize(img, (output_shape[1], output_shape[0]))
@@ -998,6 +1007,122 @@ class tools():
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         return img
+
+    def add_noise_by_perlin(self,img,res=(16,16)):
+        shape = img.shape[:-1]
+        a = generate_perlin_noise_2d(
+            shape, res, tileable=(False, False), interpolant=interpolant)
+        ave = np.average(a)
+        std = np.std(a)
+        b = np.where(a > ave + 1 * std, 255, 0).astype(np.uint8)
+        #----random natural image
+        img_back = np.fromfile(np.random.choice(self.paths_flower),dtype=np.uint8)
+        img_back = cv2.imdecode(img_back,1)
+        img_back = cv2.resize(img_back,b.shape[::-1])
+
+        #----
+        img_noise = cv2.bitwise_and(img_back,img_back,mask=b)
+        img_lack = cv2.bitwise_and(img,img,mask=255 - b)
+
+
+        return img_lack + img_noise
+
+    def get_perlin_noise(self,shape,res=(16,16)):
+        a = generate_perlin_noise_2d(
+            shape, res, tileable=(False, False), interpolant=interpolant)
+        ave = np.average(a)
+        std = np.std(a)
+        b = np.where(a > ave + 1 * std, 255, 0).astype(np.uint8)
+        # ----random natural image
+        img_back = np.fromfile(np.random.choice(self.paths_flower), dtype=np.uint8)
+        img_back = cv2.imdecode(img_back, 1)
+        img_back = cv2.resize(img_back, b.shape[::-1])
+
+        return b,img_back
+
+
+def interpolant(t):
+    return t*t*t*(t*(t*6 - 15) + 10)
+
+def generate_perlin_noise_2d(shape,res,tileable=(False, False),interpolant=interpolant):
+    """Generate a 2D numpy array of perlin noise.
+    Args:
+        shape: The shape of the generated array (tuple of two ints).
+            This must be a multple of res.
+        res: The number of periods of noise to generate along each
+            axis (tuple of two ints). Note shape must be a multiple of
+            res.
+        tileable: If the noise should be tileable along each axis
+            (tuple of two bools). Defaults to (False, False).
+        interpolant: The interpolation function, defaults to
+            t*t*t*(t*(t*6 - 15) + 10).
+    Returns:
+        A numpy array of shape shape with the generated noise.
+    Raises:
+        ValueError: If shape is not a multiple of res.
+    """
+    delta = (res[0] / shape[0], res[1] / shape[1])
+    d = (shape[0] // res[0], shape[1] // res[1])
+    grid = np.mgrid[0:res[0]:delta[0], 0:res[1]:delta[1]]\
+             .transpose(1, 2, 0) % 1
+    # Gradients
+    angles = 2*np.pi*np.random.rand(res[0]+1, res[1]+1)
+    gradients = np.dstack((np.cos(angles), np.sin(angles)))
+    if tileable[0]:
+        gradients[-1,:] = gradients[0,:]
+    if tileable[1]:
+        gradients[:,-1] = gradients[:,0]
+    gradients = gradients.repeat(d[0], 0).repeat(d[1], 1)
+    g00 = gradients[    :-d[0],    :-d[1]]
+    g10 = gradients[d[0]:     ,    :-d[1]]
+    g01 = gradients[    :-d[0],d[1]:     ]
+    g11 = gradients[d[0]:     ,d[1]:     ]
+    # Ramps
+    n00 = np.sum(np.dstack((grid[:,:,0]  , grid[:,:,1]  )) * g00, 2)
+    n10 = np.sum(np.dstack((grid[:,:,0]-1, grid[:,:,1]  )) * g10, 2)
+    n01 = np.sum(np.dstack((grid[:,:,0]  , grid[:,:,1]-1)) * g01, 2)
+    n11 = np.sum(np.dstack((grid[:,:,0]-1, grid[:,:,1]-1)) * g11, 2)
+    # Interpolation
+    t = interpolant(grid)
+    n0 = n00*(1-t[:,:,0]) + t[:,:,0]*n10
+    n1 = n01*(1-t[:,:,0]) + t[:,:,0]*n11
+    return np.sqrt(2)*((1-t[:,:,1])*n0 + t[:,:,1]*n1)
+
+def generate_fractal_noise_2d(shape, res, octaves=1, persistence=0.5,
+        lacunarity=2, tileable=(False, False),
+        interpolant=interpolant
+):
+    """Generate a 2D numpy array of fractal noise.
+    Args:
+        shape: The shape of the generated array (tuple of two ints).
+            This must be a multiple of lacunarity**(octaves-1)*res.
+        res: The number of periods of noise to generate along each
+            axis (tuple of two ints). Note shape must be a multiple of
+            (lacunarity**(octaves-1)*res).
+        octaves: The number of octaves in the noise. Defaults to 1.
+        persistence: The scaling factor between two octaves.
+        lacunarity: The frequency factor between two octaves.
+        tileable: If the noise should be tileable along each axis
+            (tuple of two bools). Defaults to (False, False).
+        interpolant: The, interpolation function, defaults to
+            t*t*t*(t*(t*6 - 15) + 10).
+    Returns:
+        A numpy array of fractal noise and of shape shape generated by
+        combining several octaves of perlin noise.
+    Raises:
+        ValueError: If shape is not a multiple of
+            (lacunarity**(octaves-1)*res).
+    """
+    noise = np.zeros(shape)
+    frequency = 1
+    amplitude = 1
+    for _ in range(octaves):
+        noise += amplitude * generate_perlin_noise_2d(
+            shape, (frequency*res[0], frequency*res[1]), tileable, interpolant
+        )
+        frequency *= lacunarity
+        amplitude *= persistence
+    return noise
 
 def modify_contrast_and_brightness(img, br=0, ct=100,standard=127.5):
     # brightness = br
@@ -2344,7 +2469,7 @@ if __name__ == "__main__":
     # img_mask(img_source, json_path,zoom_in_value=[75,77,88,88], img_type='path')
 
     #----check results
-    dir_path = r"D:\code\model_saver\AE_Seg_20"
+    dir_path = r"D:\code\model_saver\AE_st2118_22"
     check_results(dir_path, encript_flag=False,epoch_range=[15,300])
 
     #----get_paths_labels

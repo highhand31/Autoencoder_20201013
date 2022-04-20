@@ -12,7 +12,7 @@ else:
 print(tf.__version__)
 sys.path.append(r'G:\我的雲端硬碟\Python\Code\Pycharm\utility')
 from Utility import tools,file_transfer,file_decode_v2
-from models_AE import AE_transpose_4layer,tf_mish,AE_JNet,AE_Resnet_Rot,AE_pooling_net,AE_Unet
+from models_AE import AE_transpose_4layer,tf_mish,AE_JNet,AE_Resnet_Rot,AE_pooling_net,AE_Unet,AE_VIT,AE_pooling_net_V2
 
 
 print_out = True
@@ -254,6 +254,8 @@ class AE():
         process_dict = para_dict['process_dict']
         print_out = para_dict.get('print_out')
         add_name_tail = para_dict.get('add_name_tail')
+        stride_list = para_dict.get('stride_list')
+        to_Vit = para_dict.get('to_Vit')
         dtype = para_dict.get('dtype')
 
         #----var
@@ -263,6 +265,7 @@ class AE():
         # ct_ratio = 1
         pb_extension = 'pb'
         log_extension = 'json'
+        pb_save_list = []
 
         #----var process
         if encript_flag is True:
@@ -329,10 +332,20 @@ class AE():
             recon = tf.identity(recon, name='output_AE')
             #(tf_input, kernel_list, filter_list,pool_kernel=2,activation=tf.nn.relu,pool_type=None)
             # recon = AE_refinement(temp,96)
+        elif infer_method == "AE_VIT":
+            recon = AE_VIT(tf_input, kernel_list, filter_list,activation=acti_func,
+                                              pool_kernel_list=pool_kernel,pool_type_list=pool_type,
+                                   rot=rot,print_out=print_out,preprocess_dict=preprocess_dict)
+            recon = tf.identity(recon, name='output_AE')
         elif infer_method == "AE_pooling_net":
             recon = AE_pooling_net(tf_input, kernel_list, filter_list,activation=acti_func,
                                               pool_kernel_list=pool_kernel,pool_type_list=pool_type,
-                                   rot=rot,print_out=print_out,preprocess_dict=preprocess_dict)
+                                   stride_list=stride_list,rot=rot,print_out=print_out)
+            recon = tf.identity(recon,name='output_AE')
+        elif infer_method == "AE_pooling_net_V2":#add the transformer
+            recon = AE_pooling_net_V2(tf_input, kernel_list, filter_list,stride_list,activation=acti_func,
+                                              pool_kernel_list=pool_kernel,pool_type_list=pool_type,
+                                   to_Vit=to_Vit,print_out=print_out)
             recon = tf.identity(recon,name='output_AE')
         elif infer_method == "AE_Unet":
             recon = AE_Unet(tf_input, kernel_list, filter_list,activation=acti_func,
@@ -404,7 +417,6 @@ class AE():
             #     else:
             #         opt_AE_2 = tf.train.AdamOptimizer(learning_rate=lr).minimize(loss_AE_2)
 
-
         # ----create the dir to save model weights(CKPT, PB)
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
@@ -436,12 +448,7 @@ class AE():
         pb_save_path = os.path.join(save_dir, pb_save_path)
 
         # ----appoint PB node names
-        if activation == 'mish':
-            node_name = 'output_AE/mul'
-        else:
-            # node_name = 'output_AE/Relu'
-            node_name = 'output_AE'
-        pb_save_list = [node_name, "embeddings","loss_AE"]
+        pb_save_list.extend(['output_AE', "loss_AE"])
 
         # ----create the log(JSON)
         count = 0
@@ -491,6 +498,7 @@ class AE():
         save_period = para_dict.get('save_period')
         target_dict = para_dict.get('target')
         print_out = para_dict.get('print_out')
+        to_read_manual_cmd = para_dict.get('to_read_manual_cmd')
 
         #----special_img_dir
         if self.special_img_dir is not None:
@@ -546,6 +554,10 @@ class AE():
         #----update content
         self.content = self.log_update(self.content, para_dict)
 
+        #----read the manual cmd
+        if to_read_manual_cmd is True:
+            j_path = os.path.join(self.save_dir, 'manual_cmd.json')
+
 
         # ----calculate iterations of one epoch
         # train_ites = math.ceil(img_quantity / batch_size)
@@ -588,6 +600,16 @@ class AE():
 
                 # ----epoch training
                 for epoch in range(epochs):
+                    # ----read manual cmd
+                    if to_read_manual_cmd is True:
+                        if os.path.exists(j_path):
+                            with open(j_path,'r') as f:
+                                cmd_dict = json.load(f)
+                            if cmd_dict.get('to_stop_training') is True:
+                                break_flag = True
+                                msg = "接收到manual cmd: stop the training!"
+                                say_sth(msg, print_out=print_out)
+
                     # ----break the training
                     if break_flag:
                         break_flag = False
@@ -669,6 +691,9 @@ class AE():
                                                       random_num_range=encode_num, header=encode_header)
                                     break_flag = True
                                     break
+
+
+
                         # ----get image start and end numbers
                         ori_paths = tl.get_ite_data(train_paths_ori,index,batch_size=batch_size)
                         aug_paths = tl.get_ite_data(train_paths_aug,index,batch_size=batch_size)
@@ -1025,6 +1050,10 @@ class AE():
                     config_dict['infer_method'] = "AE_pooling_net"
                 elif infer_num == '1':  #
                     config_dict['infer_method'] = "AE_Unet"
+                elif infer_num == "2":
+                    config_dict['infer_method'] = "AE_VIT"
+                elif infer_num == "3":
+                    config_dict['infer_method'] = "AE_pooling_net_V2"
                 else:
                     config_dict['infer_method'] = "AE_transpose_4layer"
 

@@ -376,6 +376,7 @@ class AE_Seg():
             loss_method = ae_var['loss_method']
             opti_method = ae_var['opti_method']
             embed_length = ae_var['embed_length']
+            stride_list = ae_var.get('stride_list')
             scaler = ae_var.get('scaler')
             process_dict = ae_var['process_dict']
 
@@ -480,8 +481,8 @@ class AE_Seg():
                 # recon = AE_refinement(temp,96)
             elif infer_method == "AE_pooling_net":
                 recon = AE_pooling_net(tf_input_process, kernel_list, filter_list,activation=acti_func,
-                                                  pool_kernel_list=pool_kernel,pool_type_list=pool_type,
-                                       rot=rot,print_out=print_out,preprocess_dict=preprocess_dict)
+                                      pool_kernel_list=pool_kernel,pool_type_list=pool_type,
+                                      stride_list=stride_list,rot=rot,print_out=print_out)
                 recon = tf.identity(recon,name='output_AE')
             elif infer_method == "AE_Seg_pooling_net":
                 AE_out,Seg_out = AE_Seg_pooling_net(tf_input, kernel_list, filter_list,activation=acti_func,
@@ -806,6 +807,10 @@ class AE_Seg():
         #----update content
         self.content = self.log_update(self.content, para_dict)
 
+        # ----read the manual cmd
+        if para_dict.get('to_read_manual_cmd') is True:
+            j_path = os.path.join(self.save_dir, 'manual_cmd.json')
+
         # ----calculate iterations of one epoch
         # train_ites = math.ceil(img_quantity / batch_size)
         # test_ites = math.ceil(len(self.test_paths) / batch_size)
@@ -858,6 +863,15 @@ class AE_Seg():
 
                 # ----epoch training
                 for epoch in range(epochs):
+                    # ----read manual cmd
+                    if para_dict.get('to_read_manual_cmd') is True:
+                        if os.path.exists(j_path):
+                            with open(j_path, 'r') as f:
+                                cmd_dict = json.load(f)
+                            if cmd_dict.get('to_stop_training') is True:
+                                break_flag = True
+                                msg = "接收到manual cmd: stop the training!"
+                                say_sth(msg, print_out=print_out)
                     # ----break the training
                     if break_flag:
                         break_flag = False
