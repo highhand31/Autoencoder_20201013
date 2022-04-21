@@ -178,11 +178,11 @@ class Seg_performance():
         self.acc_threshold = acc_threshold
 
     def cal_defect_recall(self,save_dict=None,name=''):
-        defect_recall = self.defect_stat.T[1] / (self.defect_stat.T[0] + 1e-8)
+        self.defect_recall = self.defect_stat.T[1] / (self.defect_stat.T[0] + 1e-8)
 
         # ----save in the dict
         if save_dict is not None:
-            for arg_name, value in zip(["defect_stat","defect_recall"], [self.defect_stat,defect_recall]):
+            for arg_name, value in zip(["defect_stat","defect_recall"], [self.defect_stat,self.defect_recall]):
                 key = "seg_{}_{}_list".format(name, arg_name)
                 if save_dict.get(key) is None:
                     save_dict[key] = []
@@ -190,11 +190,16 @@ class Seg_performance():
                 else:
                     save_dict[key].append(value.tolist())
 
-        return defect_recall
+
+
+        return self.defect_recall
 
     def sum_iou_acc(self):
-
         return np.sum(self.iou+self.acc)
+
+    def sum_defect_recall(self):
+
+        return np.sum(self.defect_recall)
 
 class tools():
     def __init__(self,print_out=False):
@@ -2469,7 +2474,7 @@ if __name__ == "__main__":
     # img_mask(img_source, json_path,zoom_in_value=[75,77,88,88], img_type='path')
 
     #----check results
-    dir_path = r"D:\code\model_saver\AE_st2118_22"
+    dir_path = r"D:\code\model_saver\AE_st2118_24"
     check_results(dir_path, encript_flag=False,epoch_range=[15,300])
 
     #----get_paths_labels
