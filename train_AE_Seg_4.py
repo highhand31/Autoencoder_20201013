@@ -4,34 +4,33 @@ def get_AE_arg():
     # ----AE
     ae_var = dict()
     ae_var['train_img_dir'] = [
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\ok_parts_train",
-        r"D:\dataset\optotech\silicon_division\PDAP\藥水殘(已完成)\train",
+        r"D:\dataset\optotech\silicon_division\ST_2118\旺矽_st2118_20211014\分類_20211123\train\OK_pure",
+        r"D:\dataset\optotech\silicon_division\ST_2118\旺矽_st2118_20211014\分類_20211123\train\OK_stain",
     ]
 
     ae_var['test_img_dir'] = [
-        # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\ok_parts_test',
-        r'D:\dataset\optotech\silicon_division\PDAP\藥水殘(已完成)\test',
+        r'D:\dataset\optotech\silicon_division\ST_2118\旺矽_st2118_20211014\分類_20211123\vali\OK',
 
     ]
     # ae_var['recon_img_dir'] = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\recon_img"
-    ae_var['recon_img_dir'] = r"D:\dataset\optotech\silicon_division\PDAP\藥水殘(原圖+color圖+json檔)\L2_potion\predict_img"
+    ae_var['recon_img_dir'] = r"D:\dataset\optotech\silicon_division\ST_2118\旺矽_st2118_20211014\分類_20211123\recon"
     # ====model init
-    ae_var['model_shape'] = [None, 544, 832, 3]
+    ae_var['model_shape'] = [None, 192, 192, 3]
     ae_var['infer_method'] = "AE_pooling_net_V4"  # "AE_JNet"#"AE_transpose_4layer"
     ae_var['encode_dict'] = {
-        # 'first_layer':{'type':'resize_maxpool', 'size':[272,416]},
+        # 'first_layer':{'type':'resize_maxpool', 'size':[96,96]},
+        'first_layer':{'type':'CNN_downSampling', 'kernel':5,'filter':16},
         # 'first_layer':{'type':'patch_embedding', 'patch_size':2,'filter':8},
-        'first_layer': {'type': 'CNN_downSampling', 'kernel': 5, 'filter': 6},
-        'kernel_list': [3, 3],
-        'filter_list': [64, 128],
+        'kernel_list': [3,3],#[7, 5],
+        'filter_list': [32, 48],
         'stride_list': [4, 4],
         'pool_type_list': ['max', 'ave'],
         'pool_kernel_list': [7, 5],
     }
     ae_var['decode_dict'] = {
         'cnn_type':'resnet',
-        'kernel_list': [7, 5, 5],
-        'filter_list': [128, 64, 48],
+        'kernel_list': [7,5,5],#[5, 5, 7],
+        'filter_list': [80, 64, 48],
         'stride_list': [4, 4, 2],
     }
     ae_var['rot'] = False
@@ -119,14 +118,14 @@ if __name__ == "__main__":
 
     para_dict['show_data_qty'] = True
     para_dict['learning_rate'] = 1e-4
-    para_dict['epochs'] = 100
+    para_dict['epochs'] = 200
     #----train
     para_dict['eval_epochs'] = 2
     para_dict['GPU_ratio'] = None
 
     para_dict['ae_var'] = ae_var
-    para_dict['seg_var'] = seg_var
-    para_dict['save_dir'] = r"D:\code\model_saver\AE_Seg_52"
+    # para_dict['seg_var'] = seg_var
+    para_dict['save_dir'] = r"D:\code\model_saver\AE_Seg_49"
     para_dict['save_pb_name'] = 'pb_model'
     para_dict['add_name_tail'] = False
     para_dict['print_out'] = True
