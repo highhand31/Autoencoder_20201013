@@ -112,27 +112,32 @@ if __name__ == "__main__":
     seg_var = get_SEG_arg()
 
     #----common var
-    para_dict['preprocess_dict'] = {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
+    # para_dict['preprocess_dict'] = {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
     #{'ct_ratio': 1.48497, 'bias': 0.25, 'br_ratio': 0.25098}
     # #default {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
 
-    para_dict['show_data_qty'] = True
-    para_dict['learning_rate'] = 1e-4
-    para_dict['epochs'] = 200
+    # para_dict['show_data_qty'] = True
+    # para_dict['learning_rate'] = 1e-4
+    # para_dict['epochs'] = 200
     #----train
-    para_dict['eval_epochs'] = 2
-    para_dict['GPU_ratio'] = None
+    # para_dict['eval_epochs'] = 2
+    # para_dict['GPU_ratio'] = None
 
     para_dict['ae_var'] = ae_var
-    # para_dict['seg_var'] = seg_var
-    para_dict['save_dir'] = r"D:\code\model_saver\AE_Seg_49"
-    para_dict['save_pb_name'] = 'pb_model'
-    para_dict['add_name_tail'] = False
-    para_dict['print_out'] = True
-    para_dict['to_read_manual_cmd'] = True
+    para_dict['seg_var'] = seg_var
+    para_dict['save_dir'] = r"D:\code\model_saver\AE_Seg_53"
+    # para_dict['save_pb_name'] = 'pb_model'
+    # para_dict['add_name_tail'] = False
+    # para_dict['print_out'] = True
+    # para_dict['to_read_manual_cmd'] = True
     para_dict['to_fix_ae'] = False
     para_dict['to_fix_seg'] = True
-    para_dict['use_previous_settings'] = False
+    para_dict['use_previous_settings'] = True
+    para_dict['update_dict'] = {
+        'save_dir':None,
+        'to_fix_ae':None,
+        'to_fix_seg':None,
+    }
 
 
     AE_Seg_train = AE_Seg(para_dict)

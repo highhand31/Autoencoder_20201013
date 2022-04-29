@@ -17,27 +17,28 @@ def get_AE_arg():
     ae_var['recon_img_dir'] = r"D:\dataset\optotech\silicon_division\PDAP\藥水殘(原圖+color圖+json檔)\L2_potion\predict_img"
     # ====model init
     ae_var['model_shape'] = [None, 544, 832, 3]
-    ae_var['infer_method'] = "AE_pooling_net_V4"  # "AE_JNet"#"AE_transpose_4layer"
+    ae_var['infer_method'] = "AE_pooling_net_V3"  # "AE_JNet"#"AE_transpose_4layer"
     ae_var['encode_dict'] = {
-        # 'first_layer':{'type':'resize_maxpool', 'size':[272,416]},
+        'first_layer':{'type':'resize', 'size':[272,416]},
         # 'first_layer':{'type':'patch_embedding', 'patch_size':2,'filter':8},
-        'first_layer': {'type': 'CNN_downSampling', 'kernel': 5, 'filter': 6},
-        'kernel_list': [3, 3],
+        # 'first_layer': {'type': 'CNN_downSampling', 'kernel': 5, 'filter': 6},
+        'kernel_list': [7, 5],
         'filter_list': [64, 128],
         'stride_list': [4, 4],
         'pool_type_list': ['max', 'ave'],
         'pool_kernel_list': [7, 5],
     }
     ae_var['decode_dict'] = {
-        'cnn_type':'resnet',
-        'kernel_list': [7, 5, 5],
-        'filter_list': [128, 64, 48],
+        'cnn_type':'',
+        'kernel_list': [5, 7, 7],
+        'filter_list': [128, 64, 64],
         'stride_list': [4, 4, 2],
     }
+    ae_var['to_reduce'] = True
     ae_var['rot'] = False
-    ae_var['kernel_list'] = [7, 5, 5, 3, 3]
+    ae_var['kernel_list'] = [7, 5]
     # para_dict['filter_list'] = [64,96,144,192,256]
-    ae_var['filter_list'] = [32, 64, 96, 128, 256]
+    ae_var['filter_list'] = [128, 256]
     ae_var['conv_time'] = 1
     ae_var['embed_length'] = 144
     ae_var['scaler'] = 2
@@ -79,8 +80,24 @@ def get_SEG_arg():
                                    ]
     seg_var['predict_img_dir'] = None  # [r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\predict_img']
     seg_var['to_train_w_AE_paths'] = True
-    seg_var['infer_method'] = 'Seg_DifNet'
-    seg_var['rot'] = True
+    seg_var['infer_method'] = 'Seg_DifNet_V2'#'Seg_DifNet'
+    seg_var['encode_dict'] = {
+        # 'first_layer':{'type':'resize_maxpool', 'size':[272,416]},
+        # 'first_layer':{'type':'patch_embedding', 'patch_size':2,'filter':8},
+        'first_layer': {'type': 'CNN_downSampling', 'kernel': 5, 'filter': 16},
+        'kernel_list': [3, 3],
+        'filter_list': [32, 48],
+        'stride_list': [4, 4],
+        'pool_type_list': ['max', 'ave'],
+        'pool_kernel_list': [7, 5],
+    }
+    seg_var['decode_dict'] = {
+        'cnn_type': 'resnet',
+        'kernel_list': [7, 5, 5],
+        'filter_list': [48, 32, 16],
+        'stride_list': [4, 4, 2],
+    }
+    # seg_var['rot'] = True
     seg_var['kernel_list'] = [3, 3]
     seg_var['filter_list'] = [64, 128]
     seg_var['pool_type'] = ['cnn']
@@ -119,20 +136,20 @@ if __name__ == "__main__":
 
     para_dict['show_data_qty'] = True
     para_dict['learning_rate'] = 1e-4
-    para_dict['epochs'] = 100
+    para_dict['epochs'] = 300
     #----train
     para_dict['eval_epochs'] = 2
     para_dict['GPU_ratio'] = None
 
     para_dict['ae_var'] = ae_var
     para_dict['seg_var'] = seg_var
-    para_dict['save_dir'] = r"D:\code\model_saver\AE_Seg_52"
+    para_dict['save_dir'] = r"D:\code\model_saver\AE_Seg_56"
     para_dict['save_pb_name'] = 'pb_model'
     para_dict['add_name_tail'] = False
     para_dict['print_out'] = True
     para_dict['to_read_manual_cmd'] = True
     para_dict['to_fix_ae'] = False
-    para_dict['to_fix_seg'] = True
+    para_dict['to_fix_seg'] = False
     para_dict['use_previous_settings'] = False
 
 
