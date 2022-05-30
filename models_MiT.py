@@ -31,7 +31,7 @@ class PatchEmbedding():
         # self.num_patches = (image_size[0] // stride[0]) * (image_size[1] // stride[1])
         self.stride = stride
         self.embed_len = embed_len
-        self.conv2D = v2.keras.layers.Conv2D(embed_len,kernel,strides=stride,padding=padding)
+        self.conv2D = tf.keras.layers.Conv2D(embed_len,kernel,strides=stride,padding=padding)
 
     def __call__(self,x):
         net = self.conv2D(x)
@@ -39,7 +39,7 @@ class PatchEmbedding():
         W = x.shape[2].value // self.stride[1]
         out_size = (H,W)
         num_patch = H * W
-        net = v2.reshape(net,[-1,num_patch,self.embed_len])
+        net = tf.reshape(net,[-1,num_patch,self.embed_len])
 
         return net,out_size
 
@@ -65,7 +65,10 @@ def scaled_dot_product_attention(q, k, v, mask):
 
   # scale matmul_qk
   dk = tf.cast(tf.shape(k)[-1], tf.float32)
-  scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
+  # dk = tf.cast(k.shape[-1].value, tf.float32)
+  sqrt = tf.math.sqrt(dk)
+  scaled_attention_logits = matmul_qk / sqrt
+  # scaled_attention_logits = matmul_qk / 5.2
 
   # add the mask to the scaled tensor.
   if mask is not None:
@@ -94,7 +97,7 @@ def nlc_to_nhwc(x, hw_shape):
     B, L, C = x.shape
     assert L == H * W, 'The seq_len doesn\'t match H, W'
     # return x.transpose(1, 2).reshape(B, C, H, W)
-    return v2.reshape(x,[-1,H,W,C])
+    return tf.reshape(x,[-1,H,W,C])
 
 def nhwc_to_nlc(x):
     """Flatten [N, H, W, C] shape tensor to [N, L, C] shape tensor.
@@ -110,17 +113,17 @@ def nhwc_to_nlc(x):
     C = x.shape[-1].value
 
     # return x.flatten(2).transpose(1, 2).contiguous()
-    return v2.reshape(x,[-1,L,C])
+    return tf.reshape(x,[-1,L,C])
 
 class MultiheadAttention():
     def __init__(self,hidden_size: int = 768,num_heads: int = 1):
         assert hidden_size % num_heads == 0, "hidden_size % num_head != 0"
 
         self.depth = hidden_size // num_heads
-        self.key = v2.keras.layers.Dense(hidden_size)
-        self.query = v2.keras.layers.Dense(hidden_size)
-        self.value = v2.keras.layers.Dense(hidden_size)
-        self.dense = v2.keras.layers.Dense(hidden_size)
+        self.key = tf.keras.layers.Dense(hidden_size)
+        self.query = tf.keras.layers.Dense(hidden_size)
+        self.value = tf.keras.layers.Dense(hidden_size)
+        self.dense = tf.keras.layers.Dense(hidden_size)
         self.num_heads = num_heads
         self.hidden_size = hidden_size
 
@@ -161,12 +164,12 @@ class MultiheadAttention():
 class EfficientMultiheadAttention():
     def __init__(self,hidden_size: int = 768,num_heads: int = 1,sr_ratio: int = 1,rate=0.1):
         self.attn = MultiheadAttention(hidden_size,num_heads)
-        self.dropout_layer = v2.keras.layers.Dropout(rate)
+        self.dropout_layer = tf.keras.layers.Dropout(rate)
         self.sr_ratio = sr_ratio
         if sr_ratio > 1:
-            self.sr = v2.keras.layers.Conv2D(hidden_size,sr_ratio,strides=sr_ratio)
+            self.sr = tf.keras.layers.Conv2D(hidden_size,sr_ratio,strides=sr_ratio)
             # The ret[0] of build_norm_layer is norm name.
-            self.norm = v2.keras.layers.LayerNormalization(epsilon=1e-6)
+            self.norm = tf.keras.layers.LayerNormalization(epsilon=1e-6)
 
     def __call__(self,x, hw_shape, identity=None):
         x_q = x
@@ -228,7 +231,7 @@ class MixFFN():
         #     kernel_size=1,
         #     stride=1,
         #     bias=True)
-        self.fc1 = v2.keras.layers.Conv2D(feedforward_channels,1,strides=1)
+        self.fc1 = tf.keras.layers.Conv2D(feedforward_channels,1,strides=1)
         # 3x3 depth wise conv to provide positional encode information
         # pe_conv = Conv2d(
         #     in_channels=feedforward_channels,
@@ -238,7 +241,7 @@ class MixFFN():
         #     padding=(3 - 1) // 2,
         #     bias=True,
         #     groups=feedforward_channels)
-        self.pe_conv = v2.keras.layers.Conv2D(feedforward_channels,3,strides=1,
+        self.pe_conv = tf.keras.layers.Conv2D(feedforward_channels,3,strides=1,
                                          padding='same',groups=feedforward_channels)
         # fc2 = Conv2d(
         #     in_channels=feedforward_channels,
@@ -246,15 +249,16 @@ class MixFFN():
         #     kernel_size=1,
         #     stride=1,
         #     bias=True)
-        self.fc2 = v2.keras.layers.Conv2D(in_channels, 1, strides=1)
+        self.fc2 = tf.keras.layers.Conv2D(in_channels, 1, strides=1)
         # drop = nn.Dropout(ffn_drop)
-        self.drop = v2.keras.layers.Dropout(ffn_drop)
+        self.drop = tf.keras.layers.Dropout(ffn_drop)
 
     def __call__(self, x, hw_shape, identity=None):
         out = nlc_to_nhwc(x, hw_shape)
         out = self.fc1(out)
         out = self.pe_conv(out)
-        out = v2.keras.activations.gelu(out)
+        # out = tf.keras.activations.gelu(out)
+        out = tf.keras.activations.relu(out)
         out = self.drop(out)
         out = self.fc2(out)
         out = self.drop(out)
@@ -270,13 +274,13 @@ class TransformerEncoderLayer():
                  drop_rate=0.,
                  attn_drop_rate=0.,
                  sr_ratio=1,):
-        self.norm1 = v2.keras.layers.LayerNormalization(epsilon=1e-6)
+        self.norm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
         self.attn = EfficientMultiheadAttention(
             hidden_size=hidden_size,
             num_heads=num_heads,
             rate=attn_drop_rate,
             sr_ratio=sr_ratio)
-        self.norm2 = v2.keras.layers.LayerNormalization(epsilon=1e-6)
+        self.norm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
         self.ffn = MixFFN(
             hidden_size=hidden_size,
             feedforward_channels=feedforward_channels,
@@ -401,7 +405,7 @@ class MixVisionTransformer():
             # in_channels = embed_dims_i
             # The ret[0] of build_norm_layer is norm name.
             # norm = build_norm_layer(norm_cfg, embed_dims_i)[1]
-            norm = v2.keras.layers.LayerNormalization(epsilon=1e-6)
+            norm = tf.keras.layers.LayerNormalization(epsilon=1e-6)
             # self.layers.append(ModuleList([patch_embed, layer, norm]))
             self.layers.append([patch_embed, layer, norm])
             # cur += num_layer
@@ -428,12 +432,12 @@ class MixVisionTransformer():
         for i, layer in enumerate(self.layers):
             #layer: [patch_embed, layer, norm]
             x, hw_shape = layer[0](x) #patch_embed
-            print("x shape:{}, hw_shape:{}".format(x, hw_shape))
+            print("Layer {}，patch_embedding shape:{}, hw_shape:{}".format(i,x, hw_shape))
             for block in layer[1]:
                 x = block(x, hw_shape)#TransformerEncoderLayer
-                print("x shape:{}".format(x))
+                print("Encoder shape:{}".format(x))
             x = layer[2](x) #norm
-            print("x shape:{}".format(x))
+            #print("x shape:{}".format(x))
             x = nlc_to_nhwc(x, hw_shape)
             if i in self.out_indices:
                 outs.append(x)
@@ -452,22 +456,22 @@ class MiTDecoder():
         net_list = []
 
         for x in inputs:
-            net = v2.keras.layers.Conv2D(self.filters,1)(x)
-            net = v2.keras.layers.LayerNormalization(epsilon=1e-6)(net)
-            net = v2.keras.activations.relu(net)
+            net = tf.keras.layers.Conv2D(self.filters,1)(x)
+            net = tf.keras.layers.LayerNormalization(epsilon=1e-6)(net)
+            net = tf.keras.activations.relu(net)
 
-            net = v2.image.resize(net,img_resize)
+            net = tf.image.resize(net,img_resize)
 
             net_list.append(net)
 
-        net = v2.concat(net_list,axis=-1)
+        net = tf.concat(net_list,axis=-1)
 
-        net = v2.keras.layers.Conv2D(self.filters, 1)(net)
-        net = v2.keras.layers.LayerNormalization(epsilon=1e-6)(net)
-        net = v2.keras.activations.relu(net)
+        net = tf.keras.layers.Conv2D(self.filters, 1)(net)
+        net = tf.keras.layers.LayerNormalization(epsilon=1e-6)(net)
+        net = tf.keras.activations.relu(net)
 
-        net = v2.keras.layers.SpatialDropout2D(self.dropout_ratio)(net)
-        net = v2.keras.layers.Conv2D(self.num_classes, 1)(net)
+        net = tf.keras.layers.SpatialDropout2D(self.dropout_ratio)(net)
+        net = tf.keras.layers.Conv2D(self.num_classes, 1)(net)
 
         return net
 

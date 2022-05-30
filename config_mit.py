@@ -1,5 +1,5 @@
 
-b0 = {"embed_dims":32,
+b0 = {"embed_dims":8,#32
       "num_stages":4,
       "num_layers":[2, 2, 2, 2],
       "num_heads":[1, 2, 5, 8],
