@@ -76,7 +76,7 @@ def get_SEG_arg(**kwargs):
     #                                ]
     # seg_var['predict_img_dir'] = [r'D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\predict_img']
     seg_var['to_train_w_AE_paths'] = False
-    seg_var['infer_method'] = "Seg_pooling_net_V4"#'Seg_pooling_net_V4'#'mit_b0'#'Seg_pooling_net_V4'#'Seg_DifNet'
+    seg_var['infer_method'] = "Seg_pooling_net_V8"#'Seg_pooling_net_V4'#'mit_b0'#'Seg_pooling_net_V4'#'Seg_DifNet'
     seg_var['encode_dict'] = {
         "first_layer": {
             "type": "dilated_downSampling",
@@ -180,14 +180,22 @@ if __name__ == "__main__":
 
     #----SEG args
     train_img_seg_dir = [
-        r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\train"
+        # r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\train",
+        r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
+        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
+        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2",
     ]
     test_img_seg_dir = [
-        r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\test"
+        # r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\test",
+        r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test',
     ]
     predict_img_dir = [
-        r'D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\predict_img']
-    id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\classnames.txt"
+        # r'D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\predict_img',
+        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\selected",
+    ]
+
+    id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
+    #r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\classnames.txt"
 
 
     #----common var
