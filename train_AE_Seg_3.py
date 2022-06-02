@@ -4,30 +4,33 @@ def get_AE_arg():
     # ----AE
     ae_var = dict()
     ae_var['train_img_dir'] = [
-        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\ok_parts_train",
-        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220527_比例更改的圖片\OK_train",
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\ok_parts_train",
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220527_比例更改的圖片\OK_train",
         # r"D:\dataset\optotech\silicon_division\PDAP\藥水殘(已完成)\train",
         # r"D:\dataset\optotech\014\20220429_preprocess\train_ok"
         # r"D:\dataset\optotech\014\20220506_preprocess\train_ok"
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\AE\train_OK"
         # r"D:\dataset\optotech\014\20220524_preprocess\014IRA-T_0.0.6_data\OK_train"
+        r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\train\OK",
     ]
 
     ae_var['test_img_dir'] = [
-        r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\ok_parts_test',
-        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220527_比例更改的圖片\OK_test",
+        # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\ok_parts_test',
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220527_比例更改的圖片\OK_test",
         # r'D:\dataset\optotech\silicon_division\PDAP\藥水殘(已完成)\test',
         # r"D:\dataset\optotech\014\20220429_preprocess\test_ok"
         # r"D:\dataset\optotech\014\20220506_preprocess\test_ok"
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\AE\test_OK"
         # r"D:\dataset\optotech\014\20220524_preprocess\014IRA-T_0.0.6_data\OK_test"
+        r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\test\OK",
     ]
-    ae_var['recon_img_dir'] = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\recon_img"
+    # ae_var['recon_img_dir'] = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\recon_img"
     # ae_var['recon_img_dir'] = r"D:\dataset\optotech\014\20220429_preprocess\recon_img"
     # ae_var['recon_img_dir'] = r"D:\dataset\optotech\014\20220506_preprocess\recon_img"
     # ae_var['recon_img_dir'] = r"D:\dataset\optotech\silicon_division\PDAP\藥水殘(原圖+color圖+json檔)\L2_potion\predict_img"
     # ae_var['recon_img_dir'] = r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\AE\recon_img"
     # ae_var['recon_img_dir'] = r"D:\dataset\optotech\014\20220524_preprocess\014IRA-T_0.0.6_data\recon_img"
+    ae_var['recon_img_dir'] = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\recon_img"
     # ====model init
     ae_var['model_shape'] = [None, 512, 832, 3]#[None,544,832,3]
     ae_var['infer_method'] = "AE_pooling_net_V7"  # "AE_JNet"#"AE_transpose_4layer"
@@ -84,26 +87,29 @@ def get_SEG_arg():
     # ----SEG
     seg_var = dict()
     # seg_var['id2class_name'] = {0:'_background_',1:'hole',2:'gold_particle',3:'particle'}
-    seg_var['id2class_name'] = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
+    # seg_var['id2class_name'] = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
+    seg_var['id2class_name'] = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\classnames.txt"
     # seg_var['id2class_name'] = r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\classnames.txt"
     # seg_var['id2class_name'] = {0:'_background_',1:'potion'}
     seg_var['train_img_seg_dir'] = [
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\PD-55092G-AP_0.0.1_dataset\Seg_data\gold_particle\train",
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\PD-55092G-AP_0.0.1_dataset\Seg_data\hole\train",
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\PD-55092G-AP_0.0.1_dataset\Seg_data\Particle\train",
-        r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
-        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
-        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2"
+        # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2"
         # r'D:\dataset\optotech\silicon_division\PDAP\藥水殘(原圖+color圖+json檔)\L2_potion\train'
+        r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\train"
                                     ]
     seg_var['test_img_seg_dir'] = [
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\PD-55092G-AP_0.0.1_dataset\Seg_data\gold_particle\test",
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\PD-55092G-AP_0.0.1_dataset\Seg_data\hole\test",
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\PD-55092G-AP_0.0.1_dataset\Seg_data\Particle\test",
-        r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test',
+        # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test',
         # r'D:\dataset\optotech\silicon_division\PDAP\藥水殘(原圖+color圖+json檔)\L2_potion\test'
+        r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\test"
                                    ]
-    seg_var['predict_img_dir'] = [r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\selected']
+    seg_var['predict_img_dir'] = [r'D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\predict_img']
     seg_var['to_train_w_AE_paths'] = False
     seg_var['infer_method'] = "Seg_pooling_net_V4"#'Seg_pooling_net_V4'#'mit_b0'#'Seg_pooling_net_V4'#'Seg_DifNet'
     seg_var['encode_dict'] = {
@@ -178,21 +184,21 @@ if __name__ == "__main__":
 
     para_dict['show_data_qty'] = True
     para_dict['learning_rate'] = 1e-4
-    para_dict['epochs'] = 50
+    para_dict['epochs'] = 200
     #----train
     para_dict['eval_epochs'] = 2
     para_dict['GPU_ratio'] = None
 
     para_dict['ae_var'] = ae_var
     para_dict['seg_var'] = seg_var
-    para_dict['save_dir'] = r"D:\code\model_saver\AE_Seg_108"
+    para_dict['save_dir'] = r"D:\code\model_saver\AE_Seg_109"
     para_dict['save_pb_name'] = 'infer'
     para_dict['encript_flag'] = True
     para_dict['add_name_tail'] = True
     para_dict['print_out'] = True
     para_dict['to_read_manual_cmd'] = True
-    para_dict['to_fix_ae'] = False
-    para_dict['to_fix_seg'] = True
+    para_dict['to_fix_ae'] = True
+    para_dict['to_fix_seg'] = False
     para_dict['use_previous_settings'] = False
 
 

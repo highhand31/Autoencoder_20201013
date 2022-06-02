@@ -1,0 +1,217 @@
+from AE_Seg import AE_Seg
+
+def get_AE_arg(**kwargs):
+    # name_list = ['train_img_dir','test_img_dir','recon_img_dir','model_shape']
+    # ----AE
+    ae_var = dict()
+    # ae_var['train_img_dir'] = [
+    #     r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\train\OK",
+    # ]
+    #
+    # ae_var['test_img_dir'] = [
+    #     r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\test\OK",
+    # ]
+    #
+    # ae_var['recon_img_dir'] = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\recon_img"
+    # # ====model init
+    # ae_var['model_shape'] = [None, 512, 832, 3]#[None,544,832,3]
+    ae_var['infer_method'] = "AE_pooling_net_V7"  # "AE_JNet"#"AE_transpose_4layer"
+    ae_var['encode_dict'] = {
+        'kernel_list': [7, 5, 5, 5, 3, 3, 3],
+        'filter_list': [16, 24, 32, 40, 48, 56, 64],
+        'stride_list': [2, 2, 2, 2, 2, 2, 2],
+        'pool_type_list': ['cnn','max'],
+        'pool_kernel_list': [7, 5, 5, 5, 3, 3, 3],
+        'layer_list': [6],
+        'multi_ratio':1.5,
+    }
+    ae_var['decode_dict'] = {
+        'pool_type_list': ['cnn','max'],
+        'cnn_type':'resnet',
+        'kernel_list': [3, 3, 3, 5, 5, 5, 7],
+        'filter_list': [64, 56, 48, 40, 32, 24, 16],
+        'stride_list': [2, 2, 2, 2, 2, 2, 2],
+        'multi_ratio': 1.5,
+    }
+    ae_var['to_reduce'] = False
+    ae_var['rot'] = False
+    ae_var['kernel_list'] = [7, 5, 5, 3, 3]
+    ae_var['filter_list'] = [16, 32, 48, 64, 128]
+    ae_var['conv_time'] = 1
+    ae_var['embed_length'] = 144
+    ae_var['scaler'] = 1
+    ae_var['pool_type'] = ['max','ave']  # ['max']
+    ae_var['pool_kernel'] = [7, 2]  # [7, 2]
+    ae_var['activation'] = 'relu'
+    ae_var['loss_method'] = "ssim"
+    ae_var['opti_method'] = "adam"
+
+    # ====train
+    rdm_patch = [0.25, 0.3, 10]  # rdm_patch:[margin_ratio,patch_ratio,size_min]
+    ae_var['ratio'] = 1.0
+    ae_var['batch_size'] = 8
+    ae_var['process_dict'] = {"rdm_flip": True, 'rdm_br': True, 'rdm_blur': True,
+                              'rdm_angle': True, 'rdm_noise': False, 'rdm_shift': True,
+                              'rdm_patch': True, 'rdm_perlin':False
+                              }
+    ae_var['setting_dict'] = {'rdm_shift': 0.05, 'rdm_angle': 3, 'rdm_patch': rdm_patch}
+    ae_var['aug_times'] = 2
+    ae_var['target'] = {'type': 'loss', 'value': 1.0, 'hit_target_times': 2}
+
+    #----replace args
+    for key,value in kwargs.items():
+        ae_var[key] = value
+
+    return ae_var
+
+def get_SEG_arg(**kwargs):
+    # ----SEG
+    seg_var = dict()
+    # seg_var['id2class_name'] = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\classnames.txt"
+    # seg_var['train_img_seg_dir'] = [
+    #     r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\train"
+    #                                 ]
+    # seg_var['test_img_seg_dir'] = [
+    #     r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\test"
+    #                                ]
+    # seg_var['predict_img_dir'] = [r'D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\predict_img']
+    seg_var['to_train_w_AE_paths'] = False
+    seg_var['infer_method'] = "Seg_pooling_net_V4"#'Seg_pooling_net_V4'#'mit_b0'#'Seg_pooling_net_V4'#'Seg_DifNet'
+    seg_var['encode_dict'] = {
+        "first_layer": {
+            "type": "dilated_downSampling",
+            "kernel": 5,
+            "filter": 8,
+            "ratio": [1, 2, 5]
+        },
+        'kernel_list': [3, 3, 3],
+        'filter_list': [32, 48, 64],
+        'stride_list': [2, 2, 2],
+        'pool_type_list': ['max'],
+        'pool_kernel_list': [5, 5, 5],
+        'multi_ratio': 2,
+        # 'kernel_list': [7, 5, 5, 5, 3, 3, 3],
+        # 'filter_list': [16, 24, 32, 40, 48, 56, 64],
+        # 'stride_list': [2, 2, 2, 2, 2, 2, 2],
+        # 'pool_type_list': ['cnn', 'max'],
+        # 'pool_kernel_list': [7, 5, 5, 5, 3, 3, 3],
+        # 'layer_list': [3],
+    }
+    seg_var['decode_dict'] = {
+        # 'pool_type_list': ['cnn','max'],
+        # 'cnn_type':'resnet',
+        # 'kernel_list': [3, 3, 3, 5, 5, 5, 7],
+        # 'filter_list': [64, 56, 48, 40, 32, 24, 16],
+        # 'stride_list': [2, 2, 2, 2, 2, 2, 2],
+        # 'pool_type_list': ['max'],
+        'cnn_type':'',
+        'kernel_list': [3, 3, 3],
+        'filter_list': [64, 48, 32],
+        'stride_list': [2, 2, 2],
+        'multi_ratio': 2,
+    }
+    # seg_var['rot'] = True
+    seg_var['kernel_list'] = [3, 3]
+    seg_var['filter_list'] = [64, 128]
+    seg_var['pool_type'] = ['cnn']
+    seg_var['pool_kernel'] = [2]
+    seg_var['loss_method'] = "cross_entropy"
+    seg_var['opti_method'] = "adam"
+    seg_var['learning_rate'] = 1e-4
+    # ====train
+    seg_var['ratio'] = 1.0
+    seg_var['batch_size'] = 1
+    seg_var['setting_dict'] = {'rdm_shift': 0.05, 'rdm_angle': 5}
+
+    seg_var['process_dict'] = {"rdm_flip": True,
+                               'rdm_br': True,
+                               'rdm_blur': True,
+                               'rdm_angle': True,
+                               'rdm_shift': True,
+                               }
+    seg_var['aug_times'] = 2
+    seg_var['target_of_best'] = 'defect_recall'
+    # seg_var['eval_epochs'] = 2
+    # ----replace args
+    for key, value in kwargs.items():
+        seg_var[key] = value
+
+    return seg_var
+
+def get_commom_arg(**kwargs):
+    para_dict = dict()
+    para_dict['preprocess_dict'] = {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
+    # {'ct_ratio': 1.48497, 'bias': 0.25, 'br_ratio': 0.25098}
+    # #default {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
+
+    para_dict['show_data_qty'] = True
+    para_dict['learning_rate'] = 1e-4
+    para_dict['epochs'] = 200
+    # ----train
+    para_dict['eval_epochs'] = 2
+    para_dict['GPU_ratio'] = None
+
+    # para_dict['save_dir'] = r"D:\code\model_saver\AE_Seg_109"
+    para_dict['save_pb_name'] = 'infer'
+    para_dict['encript_flag'] = True
+    para_dict['add_name_tail'] = True
+    para_dict['print_out'] = True
+    para_dict['to_read_manual_cmd'] = True
+    para_dict['to_fix_ae'] = True
+    para_dict['to_fix_seg'] = False
+    para_dict['use_previous_settings'] = False
+
+    for key, value in kwargs.items():
+        para_dict[key] = value
+
+    return para_dict
+
+if __name__ == "__main__":
+    #----AE args
+    train_img_dir = [
+        r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\train\OK",
+    ]
+    test_img_dir = [
+        r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\test\OK",
+    ]
+    recon_img_dir = None#r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\recon_img"
+    model_shape = [None, 512, 832, 3]
+
+
+    #----SEG args
+    train_img_seg_dir = [
+        r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\train"
+    ]
+    test_img_seg_dir = [
+        r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\test"
+    ]
+    predict_img_dir = [
+        r'D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\predict_img']
+    id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\classnames.txt"
+
+
+    #----common var
+    preprocess_dict = {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
+    # {'ct_ratio': 1.48497, 'bias': 0.25, 'br_ratio': 0.25098}
+    # #default {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
+    epochs = 200
+    GPU_ratio = None
+    save_dir = r"D:\code\model_saver\AE_Seg_test"
+    to_fix_ae = True
+    to_fix_seg = False
+
+
+    ae_var = get_AE_arg(train_img_dir=train_img_dir, test_img_dir=test_img_dir, recon_img_dir=recon_img_dir,
+                        model_shape=model_shape)
+
+    seg_var = get_SEG_arg(train_img_seg_dir=train_img_seg_dir, test_img_seg_dir=test_img_seg_dir,
+                          predict_img_dir=predict_img_dir, id2class_name=id2class_name)
+
+    para_dict = get_commom_arg(preprocess_dict=preprocess_dict, epochs=epochs, GPU_ratio=GPU_ratio, save_dir=save_dir,
+                               to_fix_ae=to_fix_ae, to_fix_seg=to_fix_seg, ae_var=ae_var, seg_var=seg_var)
+
+
+    AE_Seg_train = AE_Seg(para_dict)
+    if AE_Seg_train.status:
+        AE_Seg_train.model_init(para_dict)
+        AE_Seg_train.train(para_dict)
