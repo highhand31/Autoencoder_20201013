@@ -20,10 +20,10 @@ def get_AE_arg(**kwargs):
         'kernel_list': [7, 5, 5, 5, 3, 3, 3],
         'filter_list': [16, 24, 32, 40, 48, 56, 64],
         'stride_list': [2, 2, 2, 2, 2, 2, 2],
-        'pool_type_list': ['cnn','max'],
+        'pool_type_list': ['cnn','max'],#'cnn'
         'pool_kernel_list': [7, 5, 5, 5, 3, 3, 3],
         'layer_list': [6],
-        'multi_ratio':1.5,
+        'multi_ratio':3.0,
     }
     ae_var['decode_dict'] = {
         'pool_type_list': ['cnn','max'],
@@ -31,7 +31,7 @@ def get_AE_arg(**kwargs):
         'kernel_list': [3, 3, 3, 5, 5, 5, 7],
         'filter_list': [64, 56, 48, 40, 32, 24, 16],
         'stride_list': [2, 2, 2, 2, 2, 2, 2],
-        'multi_ratio': 1.5,
+        'multi_ratio': 3.0,
     }
     ae_var['to_reduce'] = False
     ae_var['rot'] = False
@@ -54,7 +54,7 @@ def get_AE_arg(**kwargs):
                               'rdm_angle': True, 'rdm_noise': False, 'rdm_shift': True,
                               'rdm_patch': True, 'rdm_perlin':False
                               }
-    ae_var['setting_dict'] = {'rdm_shift': 0.05, 'rdm_angle': 3, 'rdm_patch': rdm_patch}
+    ae_var['setting_dict'] = {'rdm_shift': 0.1, 'rdm_angle': 5, 'rdm_patch': rdm_patch}
     ae_var['aug_times'] = 2
     ae_var['target'] = {'type': 'loss', 'value': 1.0, 'hit_target_times': 2}
 
@@ -84,11 +84,11 @@ def get_SEG_arg(**kwargs):
             "filter": 8,
             "ratio": [1, 2, 5]
         },
-        'kernel_list': [3, 3, 3],
-        'filter_list': [32, 48, 64],
-        'stride_list': [2, 2, 2],
-        'pool_type_list': ['max'],
-        'pool_kernel_list': [5, 5, 5],
+        'kernel_list': [3, 3, 3, 3],
+        'filter_list': [32, 48, 64, 80],
+        'stride_list': [2, 2, 2, 2],
+        'pool_type_list': ['cnn'],
+        'pool_kernel_list': [5, 5, 5, 5],
         'multi_ratio': 2,
         # 'kernel_list': [7, 5, 5, 5, 3, 3, 3],
         # 'filter_list': [16, 24, 32, 40, 48, 56, 64],
@@ -105,9 +105,9 @@ def get_SEG_arg(**kwargs):
         # 'stride_list': [2, 2, 2, 2, 2, 2, 2],
         # 'pool_type_list': ['max'],
         'cnn_type':'',
-        'kernel_list': [3, 3, 3],
-        'filter_list': [64, 48, 32],
-        'stride_list': [2, 2, 2],
+        'kernel_list': [3, 3, 3, 3],
+        'filter_list': [80, 64, 48, 32],
+        'stride_list': [2, 2, 2, 2],
         'multi_ratio': 2,
     }
     # seg_var['rot'] = True
@@ -169,13 +169,21 @@ def get_commom_arg(**kwargs):
 if __name__ == "__main__":
     #----AE args
     train_img_dir = [
-        r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\train\OK",
+        r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\training\L1_OK_無分類",
+        r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\training\L2_OK_無分類",
+        r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\training\L4_OK_無分類"
+        # r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\train\OK",
+        # r"D:\dataset\optotech\009IRC-FB\AE\train",
+        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\training\L2_OK_晶紋"
+
     ]
     test_img_dir = [
-        r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\test\OK",
+        # r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\test\OK",
+        # r"D:\dataset\optotech\009IRC-FB\AE\test",
+        r"D:\dataset\optotech\009IRC-FB\AE\test_L1_L2_L4"
     ]
-    recon_img_dir = None#r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\recon_img"
-    model_shape = [None, 512, 832, 3]
+    recon_img_dir = r"D:\dataset\optotech\009IRC-FB\AE\recon4train"
+    model_shape = [None, 192, 192, 3]#[None, 512, 832, 3]
 
 
     #----SEG args
@@ -204,16 +212,16 @@ if __name__ == "__main__":
     # #default {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
     epochs = 200
     GPU_ratio = None
-    save_dir = r"D:\code\model_saver\AE_Seg_test"
-    to_fix_ae = True
-    to_fix_seg = False
+    save_dir = r"D:\code\model_saver\AE_Seg_126"
+    to_fix_ae = False
+    to_fix_seg = True
 
 
     ae_var = get_AE_arg(train_img_dir=train_img_dir, test_img_dir=test_img_dir, recon_img_dir=recon_img_dir,
                         model_shape=model_shape)
 
-    seg_var = get_SEG_arg(train_img_seg_dir=train_img_seg_dir, test_img_seg_dir=test_img_seg_dir,
-                          predict_img_dir=predict_img_dir, id2class_name=id2class_name)
+    seg_var = None#get_SEG_arg(train_img_seg_dir=train_img_seg_dir, test_img_seg_dir=test_img_seg_dir,
+                          #predict_img_dir=predict_img_dir, id2class_name=id2class_name)
 
     para_dict = get_commom_arg(preprocess_dict=preprocess_dict, epochs=epochs, GPU_ratio=GPU_ratio, save_dir=save_dir,
                                to_fix_ae=to_fix_ae, to_fix_seg=to_fix_seg, ae_var=ae_var, seg_var=seg_var)
