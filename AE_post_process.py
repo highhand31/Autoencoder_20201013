@@ -60,9 +60,14 @@ def pixel_substraction(data_ori, data_recon, **kwargs):
             #----轉換數值單位
             # img_ori_int16 = img_ori.astype(np.int16)
             # img_recon_int16 = img_recon.astype(np.int16)
+
             #----相減取絕對值
             img_subs = np.abs(img_ori - img_recon)
             # img_subs = cv2.absdiff(img_ori,img_recon)
+
+            #----相減不取絕對值
+            # subs = img_recon - img_ori
+            # img_subs = np.where(subs > 0, subs, 0)
 
             #----轉換成單色圖片
             img_subs = cv2.cvtColor(img_subs, cv2.COLOR_BGR2GRAY)
@@ -675,7 +680,7 @@ def AE_find_defects(img_dir, pb_path, diff_th, cc_th, batch_size=32, zoom_in_val
     rec_coor_list = list()
     name_list= ['original','defect labeled']
     color = (1, 0, 0)
-    counts = np.zeros(2,dtype=np.uint16)#[ok_count,ng_count]
+
     # ----norm
     diff_th /= 255
     # ----zoom in value
@@ -718,9 +723,8 @@ def AE_find_defects(img_dir, pb_path, diff_th, cc_th, batch_size=32, zoom_in_val
                 points = points.astype(np.int16)
                 rec_coor_list.append([tuple(points[0]),tuple(points[1])])
 
-
-
     for dir_path in sub_dirs:
+        counts = np.zeros(2, dtype=np.uint16)  # [ok_count,ng_count]
         paths = [file.path for file in os.scandir(dir_path) if file.name.split(".")[-1] in img_format]
 
         if len(paths):
@@ -736,7 +740,6 @@ def AE_find_defects(img_dir, pb_path, diff_th, cc_th, batch_size=32, zoom_in_val
                 save_recon_dir = os.path.join(save_dir,'recon')
                 if not os.path.exists(save_recon_dir):
                     os.makedirs(save_recon_dir)
-
 
             ites = math.ceil(len(paths) / batch_size)
             for index in range(ites):
@@ -784,11 +787,16 @@ def AE_find_defects(img_dir, pb_path, diff_th, cc_th, batch_size=32, zoom_in_val
                 #----相減取絕對值
                 img_subs = np.abs(batch_data - batch_recon)
 
-                img_grays = np.zeros(img_subs.shape[:3])
+                img_grays = np.zeros(img_subs.shape[:3],dtype=np.float32)
+
+                #----RGB to Gray
+                for i,img in enumerate(img_subs):
+                    img_grays[i] = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+
                 # Gray = R*0.299 + G*0.587 + B*0.114
-                img_grays[:, :, :] = img_subs[:, :, :, 0] * 0.299 + \
-                                     img_subs[:, :, :, 1] * 0.587 + \
-                                     img_subs[:, :, :, 2] * 0.114
+                # img_grays[:, :, :] = img_subs[:, :, :, 0] * 0.299 + \
+                #                      img_subs[:, :, :, 1] * 0.587 + \
+                #                      img_subs[:, :, :, 2] * 0.114
 
                 img_compare_array = np.where(img_grays >= diff_th, 255, 0)
                 img_compare_array = img_compare_array.astype(np.uint8)
@@ -858,6 +866,7 @@ def AE_find_defects(img_dir, pb_path, diff_th, cc_th, batch_size=32, zoom_in_val
                     # ----connected components(method 1)使用方框標註出瑕疵
                     label_num, label_map, stats, centroids = cv2.connectedComponentsWithStats(img_compare,
                                                                                               connectivity=8)
+
                     for label in range(1, label_num):  # 0是背景
                         s = stats[label]
                         if s[-1] > cc_th:
@@ -900,7 +909,7 @@ def AE_find_defects(img_dir, pb_path, diff_th, cc_th, batch_size=32, zoom_in_val
 
                         plt.savefig(save_path)
                         # del plot
-                    else:
+                    elif save_type == "single":
                         show_img = np_data2img_data(img_copy)
                         # ----create the save path
                         #save_sub_dir = "pred_{}_ans_{}".format(predict, ans_list[abs_num])
@@ -908,7 +917,7 @@ def AE_find_defects(img_dir, pb_path, diff_th, cc_th, batch_size=32, zoom_in_val
                         cv2.imencode('.jpg', show_img[:, :, ::-1])[1].tofile(save_path)
 
             #----statistics
-            print("OK count:{}, NG count:{}".format(counts[0],counts[1]))
+            print("dir_path:{}\nOK count:{}, NG count:{}".format(dir_path,counts[0],counts[1]))
 
 def AE_find_defects_v2(img_dir, pb_path_list, diff_th, cc_th, batch_size=32, zoom_in_value=None,to_mask=False,
                            node_dict=None, process_dict=None, setting_dict=None,cc_type="rec",
@@ -1299,14 +1308,13 @@ if __name__ == "__main__":
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\result organization\PDAP55077_正檢_AE_Seg_108_20220530\find_defects\原本的測試集\original"
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\test\OK"
 
-    # img_source = r"D:\dataset\optotech\009IRC-FB\0.0.3.1_dataset\training"
     # img_source = r"D:\dataset\optotech\009IRC-FB\AE\test"
     # img_source = r"D:\dataset\optotech\009IRC-FB\AE\train"
     # img_source = r"D:\dataset\optotech\009IRC-FB\AE\AE驗證"
-    # img_source = r"D:\dataset\optotech\009IRC-FB\0.0.3.1_dataset\training\L2_NG_pad外圍殘膠"
-    # img_source = r"D:\dataset\optotech\009IRC-FB\0.0.3.1_dataset\validation\L2_NG_pad外圍殘膠"
-    # img_source = r"D:\dataset\optotech\009IRC-FB\0.0.3.1_dataset\training\L2_NG_變形"
-    img_source = r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\only_L2"
+
+    # img_source = r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\only_L2"
+    # img_source = r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\validation\L2_OK_晶紋"
+    img_source = r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\validation"#要注意是否有去除晶紋
 
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\recon_img"
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\result organization\AE_Seg_103_20220519\AE_find_defects\Particle"
@@ -1315,7 +1323,7 @@ if __name__ == "__main__":
     # pb_path = r"D:\code\model_saver\Opto_tech\AE_PDAP_top_20220208_3\infer_99.65.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_102\pb_model.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_113\infer_91.87.nst"
-    pb_path = r"D:\code\model_saver\AE_Seg_113\infer_20220617151930.nst"
+    # pb_path = r"D:\code\model_saver\AE_Seg_113\infer_20220617151930.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_113\infer_93.27.nst"
     # pb_path = r"C:\Users\User\Desktop\train_result\infer_best_epoch4_0.0.3_.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_114\infer_94.09.nst"
@@ -1328,7 +1336,11 @@ if __name__ == "__main__":
     # pb_path = r"D:\code\model_saver\AE_Seg_122\infer_97.69.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_123\infer_94.59.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_123\infer_95.78.nst"
-    # pb_path = r"D:\code\model_saver\AE_Seg_24\infer_best_epoch127.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_125\infer_91.79.nst"
+    # pb_path = r"D:\code\model_saver\AE_Seg_126\infer_95.19.nst"
+    # pb_path = r"D:\code\model_saver\AE_Seg_127\infer_96.51.nst"
+    pb_path = r"D:\code\model_saver\AE_Seg_130\infer_93.29.nst"
+
     pb_path_list = [
         # r"D:\code\model_saver\AE_Seg_113\infer_91.87.nst"
         r"D:\code\model_saver\AE_Seg_114\infer_94.09.nst",
@@ -1337,8 +1349,8 @@ if __name__ == "__main__":
     # save_dir = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E04\02\results_544x832"
     save_dir = img_source
 
-    diff_th = 50
-    cc_th = 50
+    diff_th = 30
+    cc_th = 60
 
     img_ori2process = True
     img_ori_p_args = ['gau_blur',(3,3)]  # [process_type,kernel]
@@ -1393,28 +1405,28 @@ if __name__ == "__main__":
     save_type:預設值是''，僅儲存瑕疵圖，亦可輸入compare，會儲存原圖與瑕疵圖的比較
     read_subdir:預設值是False，僅讀取資料夾內的圖片，若True，則會讀取'次'資料夾的圖片
     '''
+    save_recon = True
+    cc_type = 'rec'
+    defect_save_type = 'single'#compare, single 沒有填就不會儲存預測圖
     if True in save_type:
-        #save_dir = save_dirname
         read_subdir = True
-
         # save_dir = r"D:\dataset\optotech\009IRC-FB\AE\AE_results_192x192"
         # zoom_in_value = [75,77,88,88]#5 #[75,77,88,88]
         # mask_json_path = None#r"D:\dataset\optotech\silicon_division\PDAP\top_view\PD-55077GR-AP AI Training_2022.01.26\AE_results_544x832_diff10cc60_more_filters\pred_ng_ans_ok\t0_12_-20_MatchLightSet_作用區_Ng_1.json"
-        AE_find_defects(output_dir, pb_path, diff_th, cc_th, batch_size=batch_size, zoom_in_value=zoom_in_value,to_mask=to_mask,
-                        img_ori2process=img_ori2process,img_ori_p_args=img_ori_p_args,
-                        recon2erode=recon2erode,erode_args=erode_args,
-                        node_dict=node_dict, process_dict=process_dict, setting_dict=setting_dict, cc_type="",
-                        save_type='compare',save_recon=False,read_subdir=True,mask_json_path=mask_json_path)
+
 
     else:
         output_dir = img_source
-        # output_dir = r"D:\dataset\optotech\009IRC-FB\AE\AE_results_192x192_AE_Seg_123\pred_ok_ans_ng"
         read_subdir = False
 
-        AE_find_defects(output_dir, pb_path, diff_th, cc_th, batch_size=batch_size, zoom_in_value=zoom_in_value,
-                        to_mask=to_mask,
-                        node_dict=node_dict, process_dict=process_dict, setting_dict=setting_dict, cc_type="",
-                        save_type='', save_recon=True, read_subdir=read_subdir, mask_json_path=mask_json_path)
+    AE_find_defects(output_dir, pb_path, diff_th, cc_th, batch_size=batch_size, zoom_in_value=zoom_in_value,
+                    to_mask=to_mask,
+                    img_ori2process=img_ori2process, img_ori_p_args=img_ori_p_args,
+                    recon2erode=recon2erode, erode_args=erode_args,
+                    node_dict=node_dict, process_dict=process_dict, setting_dict=setting_dict, cc_type=cc_type,
+                    save_type=defect_save_type, save_recon=save_recon, read_subdir=read_subdir, mask_json_path=mask_json_path)
+
+
 
 
     #----AE_find_defects v2

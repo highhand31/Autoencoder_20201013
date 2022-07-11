@@ -166,8 +166,6 @@ def create_pb_filename(save_pb_name,extension,save_dir,add_name_tail=False):
         pb_save_path = "{}.{}".format(save_pb_name, extension)
     return os.path.join(save_dir, pb_save_path)
 
-
-
 #----main class
 class AE_Seg():
     def __init__(self,para_dict):
@@ -518,6 +516,27 @@ class AE_Seg():
                 recon = tf.identity(recon, name='output_AE')
                 #(tf_input, kernel_list, filter_list,pool_kernel=2,activation=tf.nn.relu,pool_type=None)
                 # recon = AE_refinement(temp,96)
+            elif infer_method.find('mit') >= 0:
+                cfg = config_mit.config[infer_method.split("_")[-1]]
+                model = MixVisionTransformer(
+                    embed_dims=cfg['embed_dims'],
+                    num_stages=cfg['num_stages'],
+                    num_layers=cfg['num_layers'],
+                    num_heads=cfg['num_heads'],
+                    patch_sizes=cfg['patch_sizes'],
+                    strides=cfg['strides'],
+                    sr_ratios=cfg['sr_ratios'],
+                    mlp_ratio=cfg['mlp_ratio'],
+                    ffn_dropout_keep_ratio=1.0,
+                    dropout_keep_rate=1.0)
+                # model.init_weights()
+                outs = model(tf_input_process)
+                # print("outs shape:",outs.shape)
+                mitDec = MiTDecoder(channels=cfg['num_heads'][-1] * cfg['embed_dims'],
+                                    dropout_ratio=0, num_classes=3)
+                logits = mitDec(outs)
+                recon = tf.identity(logits, name='output_AE')
+
             elif infer_method == "AE_pooling_net_V3":
                 recon = AE_pooling_net_V3(tf_input_process, kernel_list, filter_list, activation=acti_func,
                                           pool_kernel_list=pool_kernel, pool_type_list=pool_type,
@@ -857,12 +876,13 @@ class AE_Seg():
         if self.to_train_seg:
             seg_var = para_dict['seg_var']
             ratio_seg = seg_var.get('ratio_seg')
-            process_seg_dict = seg_var.get('process_seg_dict')
-            setting_seg_dict = seg_var.get('setting_seg_dict')
-            aug_seg_times = seg_var.get('aug_seg_times')
+            process_seg_dict = seg_var.get('process_dict')
+            setting_seg_dict = seg_var.get('setting_dict')
+            aug_seg_times = seg_var.get('aug_times')
             json_check = seg_var.get('json_check')
             batch_size_seg = seg_var['batch_size']
             pause_opt_seg = seg_var.get('pause_opt_seg')
+            self_create_label = seg_var.get('self_create_label')
 
         #----special_img_dir
         if self.special_img_dir is not None:
@@ -942,6 +962,8 @@ class AE_Seg():
                     if aug_seg_times is None:
                         aug_seg_times = 2
                     batch_size_seg = batch_size_seg // aug_seg_times  # the batch size must be integer!!
+                    if batch_size_seg < 1:
+                        batch_size_seg = 1
 
         #----update content
         self.content = self.log_update(self.content, para_dict)
@@ -1436,27 +1458,49 @@ class AE_Seg():
 
                                 #----get 4-D data
                                 if aug_enable is True:
-                                    # ----ori data
-                                    ori_data,ori_label = tl_seg.get_4D_img_label_data(ori_seg_paths,self.model_shape[1:],
-                                                                                      json_paths=ori_seg_json_paths,
-                                                                        to_norm=True, to_rgb=True,
-                                                                        to_process=False, dtype=self.dtype)
+                                    if self_create_label:
+                                        # ----ori data
+                                        #(self,paths, output_shape,to_norm=True,to_rgb=True,to_process=False,dtype='float32')
+                                        ori_data, ori_label = tl_seg.get_4D_data_create_mask(ori_seg_paths,
+                                                                                           self.model_shape[1:],
+                                                                                           to_norm=True, to_rgb=True,
+                                                                                           to_process=False,
+                                                                                           dtype=self.dtype)
 
-                                    # ----aug data
-                                    aug_data,aug_label = tl_seg.get_4D_img_label_data(aug_seg_paths,self.model_shape[1:],
-                                                                                      json_paths=aug_seg_json_paths,
-                                                              to_norm=True,
-                                                              to_rgb=True,
-                                                              to_process=True,
-                                                              dtype=self.dtype)
+                                        # ----aug data
+                                        aug_data, aug_label = tl_seg.get_4D_data_create_mask(aug_seg_paths,
+                                                                                           self.model_shape[1:],
+                                                                                           to_norm=True,
+                                                                                           to_rgb=True,
+                                                                                           to_process=True,
+                                                                                           dtype=self.dtype)
+                                    else:
+                                        # ----ori data
+                                        ori_data,ori_label = tl_seg.get_4D_img_label_data(ori_seg_paths,self.model_shape[1:],
+                                                                                          json_paths=ori_seg_json_paths,
+                                                                            to_norm=True, to_rgb=True,
+                                                                            to_process=False, dtype=self.dtype)
+
+                                        # ----aug data
+                                        aug_data,aug_label = tl_seg.get_4D_img_label_data(aug_seg_paths,self.model_shape[1:],
+                                                                                          json_paths=aug_seg_json_paths,
+                                                                  to_norm=True,
+                                                                  to_rgb=True,
+                                                                  to_process=True,
+                                                                  dtype=self.dtype)
 
                                     #----data concat
                                     batch_data = np.concatenate([ori_data, aug_data], axis=0)
                                     batch_label = np.concatenate([ori_label, aug_label], axis=0)
                                 else:
-                                    batch_data,batch_label = tl_seg.get_4D_img_label_data(ori_seg_paths,self.model_shape[1:],
-                                                                                json_paths=ori_seg_json_paths,
-                                                                               dtype=self.dtype)
+                                    if self_create_label:
+                                        batch_data, batch_label = tl_seg.get_4D_data_create_mask(ori_seg_paths,
+                                                                                               self.model_shape[1:],
+                                                                                               dtype=self.dtype)
+                                    else:
+                                        batch_data,batch_label = tl_seg.get_4D_img_label_data(ori_seg_paths,self.model_shape[1:],
+                                                                                    json_paths=ori_seg_json_paths,
+                                                                                   dtype=self.dtype)
 
                                 #----put all data to tf placeholders
                                 # recon = sess.run(self.recon,feed_dict={self.tf_input:batch_data,self.tf_keep_prob: 1.0})
@@ -1526,10 +1570,16 @@ class AE_Seg():
                                     else:
                                         seg_json_paths = None
                                     #----get batch data
-                                    batch_data, batch_label = tl_seg.get_4D_img_label_data(seg_paths,
-                                                                                           self.model_shape[1:],
-                                                                                           json_paths=seg_json_paths,
-                                                                                           dtype=self.dtype)
+                                    if self_create_label:
+                                        batch_data, batch_label = tl_seg.get_4D_data_create_mask(seg_paths,
+                                                                                                 self.model_shape[1:],
+                                                                                                 to_process=True,
+                                                                                                 dtype=self.dtype)
+                                    else:
+                                        batch_data, batch_label = tl_seg.get_4D_img_label_data(seg_paths,
+                                                                                               self.model_shape[1:],
+                                                                                               json_paths=seg_json_paths,
+                                                                                               dtype=self.dtype)
                                     #----put all data to tf placeholders
                                     recon = sess.run(self.recon,feed_dict={self.tf_input: batch_data})
 

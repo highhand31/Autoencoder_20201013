@@ -1,8 +1,8 @@
 
-b0 = {"embed_dims":8,#32
+b0 = {"embed_dims":4,#32
       "num_stages":4,
       "num_layers":[2, 2, 2, 2],
-      "num_heads":[1, 2, 5, 8],
+      "num_heads":[1, 2, 4, 6],
       "patch_sizes":[7, 3, 3, 3],
       "strides":[4, 2, 2, 2],
       'sr_ratios':[8, 4, 2, 1],

@@ -1194,8 +1194,11 @@ def Seg_pooling_net_V8(tf_input,tf_input_2,encode_dict,decode_dict,out_channel=3
     pre_embeddings = tf.layers.flatten(tf_input_2)
     embeddings = tf.nn.l2_normalize(pre_embeddings, 1, 1e-10, name='dummy_out')
 
+
+
     #----first layer process
     tf_input_layer, do_type = first_layer_process(tf_input, encode_dict)
+    # tf_input_layer, do_type = first_layer_process(tf.image.rgb_to_grayscale(tf_input), encode_dict)
     msg = "First layer process: {} with shape = {}".format(do_type, tf_input_layer.shape)
     say_sth(msg, print_out=print_out)
 

@@ -793,7 +793,7 @@ class tools():
         mask = np.array(mask, dtype=bool)
         return mask
 
-    def resize_label(self,lbl, resize,rdm_angle=False,M=None):
+    def resize_label(self,lbl, resize,to_process=False,rdm_angle=False,M=None):
         #resize format: [w,h]
         coor_dict = dict()
         h,w = lbl.shape
@@ -808,7 +808,8 @@ class tools():
             # ----將對應label number的座標處都填上1
             z_temp[coor_dict[label_num]] = 1
             #----旋轉
-            if rdm_angle is True:
+            if to_process is True and rdm_angle is True:
+                # M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
                 z_temp = cv2.warpAffine(z_temp, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
 
             # ----對z_temp進行resize(因為數值都是1，resize不會產生其他的數值)
@@ -1080,7 +1081,7 @@ class tools():
                 #----resize and change the color format
                 img = cv2.resize(img, (output_shape[1], output_shape[0]))
                 # lbl = cv2.resize(lbl, (output_shape[1], output_shape[0]))
-                lbl = self.resize_label(lbl,(output_shape[1], output_shape[0]),
+                lbl = self.resize_label(lbl,(output_shape[1], output_shape[0]), to_process=to_process,
                                         rdm_angle=self.p_dict.get('rdm_angle'),M=M)
 
                 if to_gray is True:
@@ -1208,13 +1209,20 @@ class tools():
                         patch_types = np.random.randint(0, 4, patch_times)
                         margin_x = margin_ratio * img.shape[1]
                         margin_y = margin_ratio * img.shape[0]
+                        mean = np.mean(img)
                         for patch_type in patch_types:
                             center_x = np.random.randint(margin_x, img.shape[1] - margin_x)
                             center_y = np.random.randint(margin_y, img.shape[0] - margin_y)
-                            if np.random.randint(2) == 1:
-                                color = (0, 0, 0)
+                            #----choose colors
+                            if mean > 127:
+                                color = np.random.randint(224, 255, 1).tolist() * 3
                             else:
-                                color = np.random.randint(0, 255, 3).tolist()
+                                color = np.random.randint(0, 32, 1).tolist() * 3
+
+                            # if np.random.randint(2) == 1:
+                            #     color = (0, 0, 0)
+                            # else:
+                            #     color = np.random.randint(0, 255, 3).tolist()
                             if patch_type == 0:
                                 end_x = np.random.randint(size_min, maxi_len / 2)
                                 # end_y = np.random.randint(center_y,img.shape[0])
@@ -1256,6 +1264,7 @@ class tools():
                         #img = cv2.resize(img, (output_shape[1], output_shape[0]))
                         # mask,img_back = self.get_perlin_noise(output_shape[:-1],res=(16,16))
                         img = self.add_noise_by_perlin(img,self.rdm_perlin)
+                        # img = self.add_noise_by_perlin_w_mask(img,self.rdm_perlin)
 
 
                 #----resize and change the color format
@@ -1281,6 +1290,191 @@ class tools():
                 return batch_data
         else:
             return batch_data
+
+    def get_4D_data_create_mask(self,paths, output_shape,to_norm=True,to_rgb=True,to_process=False,dtype='float32'):
+        len_path = len(paths)
+        to_gray = False
+        key_list = ['rdm_shift','rdm_patch']
+
+        #----create default np array
+        batch_dim = [len_path]
+        batch_dim.extend(output_shape)
+        if batch_dim[-1] == 1:
+            to_gray = True
+
+        batch_data = np.zeros(batch_dim, dtype=dtype)
+        batch_label = np.zeros(batch_dim[:-1], dtype=dtype)
+
+        #----setting dict process
+        if to_process is True:
+            for key in key_list:
+                if self.p_dict.get(key):
+                    if key == 'rdm_shift':
+                        corner = np.random.randint(4, size=len_path)
+                    if key == 'rdm_patch':
+                        batch_data_no_patch = np.zeros_like(batch_data)
+                        margin_ratio = self.s_dict[key][0]
+                        patch_ratio = self.s_dict[key][1]
+                        size_min = self.s_dict[key][2]
+
+
+        #----read images and do processing
+        for idx, path in enumerate(paths):
+            try:
+                img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), 1)
+            except:
+                img = None
+
+            if img is None:
+                msg = "read failed:".format(path)
+                say_sth(msg)
+            else:
+                label = None
+                if to_process is True:
+                    ori_h, ori_w, _ = img.shape
+                    if self.p_dict.get('ave_filter'):
+                        img = cv2.blur(img, self.s_dict['ave_filter'])
+                    if self.p_dict.get('gau_filter'):
+                        img = cv2.GaussianBlur(img, self.s_dict['gau_filter'], 0, 0)
+                    if self.p_dict.get('rdm_shift'):
+                        c = corner[idx]
+                        y = np.random.randint(ori_h * self.s_dict['rdm_shift'])
+                        x = np.random.randint(ori_w * self.s_dict['rdm_shift'])
+                        p = int(round((y + x) / 2))
+                        # print("x={},y={},p={}".format(x,y,p))
+                        if c == 0:
+                            img = img[p:, p:, :]
+                        elif c == 1:
+                            img = img[p:, :-(p + 1), :]
+                        elif c == 2:
+                            img = img[:-(p + 1), p:, :]
+                        elif c == 3:
+                            img = img[:-(p + 1), :-(p + 1), :]
+                        else:
+                            img = img[p:, p:, :]
+                    if self.p_dict.get('rdm_br'):
+                        mean_br = np.mean(img)
+                        try:
+                            br_factor = np.random.randint(math.floor(mean_br * self.s_dict['rdm_br'][0]),
+                                                          math.ceil(mean_br * self.s_dict['rdm_br'][1]))
+                            img = np.clip(img / mean_br * br_factor, 0, 255)
+                            img = img.astype(np.uint8)
+                        except:
+                            msg = "Error:rdm_br value"
+                            say_sth(msg)
+                    if self.p_dict.get('rdm_flip'):
+                        flip_type = np.random.choice(self.s_dict['rdm_flip'])
+                        if flip_type != 2:
+                            img = cv2.flip(img, flip_type)
+                    if self.p_dict.get('rdm_blur'):
+                        kernel = tuple(np.random.choice(self.s_dict['rdm_blur'], size=2))
+                        # print("kernel:", kernel)
+                        if np.random.randint(0, 2) == 0:
+                            img = cv2.blur(img, kernel)
+                        else:
+                            img = cv2.GaussianBlur(img, kernel, 0, 0)
+                    if self.p_dict.get('rdm_noise'):
+                        uniform_noise = np.empty((img.shape[0], img.shape[1]), dtype=np.uint8)
+                        cv2.randu(uniform_noise, 0, 255)
+                        ret, impulse_noise = cv2.threshold(uniform_noise, 230, 255, cv2.THRESH_BINARY_INV)
+                        img = cv2.bitwise_and(img, img, mask=impulse_noise)
+                    if self.p_dict.get('rdm_angle'):
+                        angle = np.random.randint(self.s_dict['rdm_angle'][0], self.s_dict['rdm_angle'][1])
+                        h, w = img.shape[:2]
+                        M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
+                        img = cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+                    if self.p_dict.get('rdm_patch'):
+                        #----put no patch image
+                        # img_no_patch = img.copy()
+                        img_no_patch = cv2.resize(img.copy(), (output_shape[1], output_shape[0]))
+                        img_no_patch = self.img_transform(img_no_patch, to_rgb=to_rgb, to_gray=to_gray)
+                        batch_data_no_patch[idx] = img_no_patch
+                        # ----
+                        maxi_len = int(sum(img.shape[:2]) / 2 * patch_ratio)
+                        patch_times = np.random.randint(1, 4)
+                        patch_types = np.random.randint(0, 4, patch_times)
+                        margin_x = margin_ratio * img.shape[1]
+                        margin_y = margin_ratio * img.shape[0]
+                        mean = np.mean(img)
+                        for patch_type in patch_types:
+                            center_x = np.random.randint(margin_x, img.shape[1] - margin_x)
+                            center_y = np.random.randint(margin_y, img.shape[0] - margin_y)
+                            #----choose colors
+                            if mean > 127:
+                                color = np.random.randint(224, 255, 1).tolist() * 3
+                            else:
+                                color = np.random.randint(0, 32, 1).tolist() * 3
+
+                            # if np.random.randint(2) == 1:
+                            #     color = (0, 0, 0)
+                            # else:
+                            #     color = np.random.randint(0, 255, 3).tolist()
+                            if patch_type == 0:
+                                end_x = np.random.randint(size_min, maxi_len / 2)
+                                # end_y = np.random.randint(center_y,img.shape[0])
+                                cv2.rectangle(img, (center_x, center_y), (center_x + end_x, center_y + end_x), color,
+                                              -1)
+                                # print("square,center_x:{},center_y:{},len:{}".format(center_x, center_y, end_x))
+                            elif patch_type == 1:
+                                radius = np.random.randint(size_min, maxi_len / 2)
+                                cv2.circle(img, (center_x, center_y), radius, color, -1)
+                                # print("circle,center_x:{},center_y:{},radius:{}".format(center_x, center_y, radius))
+                            elif patch_type == 2:  # rectangle_1
+                                lens = np.random.randint(size_min, maxi_len / 2, 2)
+                                cv2.rectangle(img, (center_x, center_y), (center_x + lens[0], center_y + lens[1]),
+                                              color, -1)
+                                # print("rectangle,center_x:{},center_y:{},len:{}".format(center_x, center_y, lens))
+                            elif patch_type == 3:  # rectangle_2
+                                ave_size = sum(img.shape[:2]) / 2
+                                long_len = np.random.randint(ave_size // 2, ave_size * 0.9)
+                                short_len = np.random.randint(3, ave_size // 4)
+                                if center_x >= ave_size // 2:
+                                    if center_y >= ave_size // 2:
+                                        pass
+                                    else:
+                                        cv2.rectangle(img, (center_x, center_y),
+                                                      (center_x + short_len, center_y + long_len),
+                                                      color, -1)
+                                else:
+                                    if center_y >= ave_size // 2:
+                                        cv2.rectangle(img, (center_x, center_y),
+                                                      (center_x + long_len, center_y + short_len),
+                                                      color, -1)
+                                    else:
+                                        lens = [long_len, short_len]
+                                        np.random.shuffle(lens)
+                                        cv2.rectangle(img, (center_x, center_y),
+                                                      (center_x + lens[0], center_y + lens[1]),
+                                                      color, -1)
+                    if self.p_dict.get('rdm_perlin'):
+                        #img = cv2.resize(img, (output_shape[1], output_shape[0]))
+                        # mask,img_back = self.get_perlin_noise(output_shape[:-1],res=(16,16))
+                        # img = self.add_noise_by_perlin(img,self.rdm_perlin)
+                        img,label = self.add_noise_by_perlin_w_mask(img,self.rdm_perlin)
+
+
+                #----image resize and change the color format
+                img = cv2.resize(img, (output_shape[1], output_shape[0]))
+
+                if to_gray is True:
+                    img = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+                    img = np.expand_dims(img,axis=-1)
+                elif to_rgb is True:
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                batch_data[idx] = img
+
+                #----label resize
+                if label is not None:
+                    label = cv2.resize(label, (output_shape[1], output_shape[0]))
+                    batch_label[idx] = label
+        #----norm
+        batch_label /= 255
+        batch_label = batch_label.astype(np.uint8)
+        if to_norm is True:
+            batch_data /= 255
+
+        #----return value process
+        return batch_data, batch_label
 
     def img_transform(self,img,to_rgb=True,to_gray=False):
         if to_gray is True:
@@ -1327,6 +1521,56 @@ class tools():
         # plt.show()
 
         return img_result
+
+    def add_noise_by_perlin_w_mask(self,img,set_dict):
+        #img format: BGR
+        #size format = [H,W]
+        img_gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+        size = img_gray.shape
+        pixel_range = set_dict['pixel_range']
+        defect_num = set_dict['defect_num']
+        # img_nature = np.fromfile(np.random.choice(set_dict['paths_color']), dtype=np.uint8)
+        # img_nature = cv2.imdecode(img_nature, 1)#BGR format
+        # img_nature = cv2.resize(img_nature, size[::-1])
+
+        img_perlin = np.fromfile(np.random.choice(set_dict['paths_noise']), dtype=np.uint8)
+        img_perlin = cv2.imdecode(img_perlin, 0)
+        img_perlin = cv2.resize(img_perlin, size[::-1])
+
+        label_num, label_map, stats, centroids = cv2.connectedComponentsWithStats(img_perlin, connectivity=8)
+        pixel_num = stats.T[-1]
+        b = np.where(pixel_num >= pixel_range[0], pixel_num, pixel_range[1] + 3)
+        index_list = np.where(b < pixel_range[1])  # index_list就是符合pixel_range的index
+        zeros = np.zeros_like(img_perlin)
+        defect_num = np.minimum(len(index_list[0]), defect_num)
+        # print("實際可執行的defect_num:", defect_num)
+        # print("符合pixel_range的數量:", len(index_list[0]))
+        img_result = img_gray.copy()
+        for idx in np.random.choice(index_list[0], defect_num, replace=False):
+            # print("idx:{},pixel num:{}".format(idx, pixel_num[idx]))
+
+            coors = np.where(label_map == idx)  # coors會是tuple，所以無法使用list extend取得所有座標
+            pixel_list = img_gray[coors]
+            img_result[coors] = 255 - pixel_list
+            zeros[coors] = 255
+
+        # defect = cv2.bitwise_and(img_nature, img_nature, mask=zeros)
+        # img_result = cv2.bitwise_and(img,img,mask=255-zeros)
+        # img_lack = cv2.bitwise_and(img, img, mask=255 - zeros)
+
+        img_result = cv2.cvtColor(img_result,cv2.COLOR_GRAY2BGR)
+
+        #----display
+        to_show = False
+        if to_show:
+            plt.figure(num=1,figsize=(10,10))
+            plt.subplot(1,2,1)
+            plt.imshow(img_result[:,:,::-1])
+            plt.subplot(1,2,2)
+            plt.imshow(zeros,cmap='gray')
+            plt.show()
+
+        return img_result,zeros
 
 
     def get_perlin_noise(self,shape,res=(16,16)):
@@ -2348,7 +2592,7 @@ def get_4D_data_2(paths, img_shape, process_dict=None):
         batch_data /= 255
         return batch_data
 
-def check_results(dir_path,encript_flag=False,epoch_range=None):
+def check_results(dir_path,encript_flag=False,epoch_range=None,only2see=None):
 
     #----var
     # json_path = os.path.join(dir_path,'train_result.json')
@@ -2374,6 +2618,9 @@ def check_results(dir_path,encript_flag=False,epoch_range=None):
 
     if encript_flag is True:
         tailer = '.nst'
+
+    if isinstance(only2see,list):
+        data_name_list = only2see
 
     #----plot data init
     data_dict = dict()
@@ -2519,7 +2766,8 @@ def check_results(dir_path,encript_flag=False,epoch_range=None):
 
     plt.figure(num=1,figsize=(int(qty_plot * 10),int(qty_plot * 3)))
     for idx,show_name in enumerate(plot_type):
-        plt.subplot(y_qty, 2, idx+1)
+        if qty_plot > 1:
+            plt.subplot(y_qty, 2, idx+1)
         #----
         for data_name, data_list in data_dict.items():
             if len(data_list) > 0:
@@ -2631,6 +2879,117 @@ def check_results(dir_path,encript_flag=False,epoch_range=None):
     #         json_path = os.path.join(dir_path, file_name + str(file_nums[idx]) + tailer)
     #         if os.path.exists(json_path):
     #             file_transfer(json_path)
+
+def result_comparison(result_dict,extract_name_list,y_axis_list,file_name = "train_result_",encript_flag=False,
+                      set_x=None):
+    #----var
+    data_dict = dict()
+    # len_vector = np.zeros(len(extract_name_list),dtype=np.int32)
+
+    tailer = '.json'
+
+    if encript_flag is True:
+        tailer = '.nst'
+
+    for count,name in enumerate(result_dict.keys()):
+        dir_path = result_dict[name]
+
+        file_nums = [int(file.name.split(".")[0].split("_")[-1]) for file in os.scandir(dir_path) if
+                     file.name.find(file_name) >= 0]
+        if len(file_nums) == 0:
+            print("No files with ({})".format(file_name))
+        else:
+            seq = np.argsort(file_nums)
+
+            #----reset lists
+            temp_dict = dict()
+            for extract_name in extract_name_list:
+                temp_dict[extract_name] = list()
+
+            for idx in seq:
+                json_path = os.path.join(dir_path, file_name + str(file_nums[idx]) + tailer)
+
+                # ----read the file
+                ret = file_decode_v2(json_path, random_num_range=10, return_value=True,
+                                     to_save=False)  # ret is None or bytes
+
+                if ret is None:
+                    print("ret is None. The file is not secured")
+                    with open(json_path, 'r') as f:
+                        content = json.load(f)
+                else:
+                    print("ret is not None. The file is decoded")
+                    content = json.loads(ret.decode())
+
+                # ----var parsing
+                for extract_name in extract_name_list:
+                    if extract_name in content.keys():
+                        temp_dict[extract_name].extend(content[extract_name])
+
+                #----read the json file
+                # if os.path.exists(json_path):
+                #     with open(json_path, 'r') as f:
+                #         content = json.load(f)
+                #
+                #     #----var parsing
+                #     for extract_name in extract_name_list:
+                #         if extract_name in content.keys():
+                #             temp_dict[extract_name].extend(content[extract_name])
+
+
+            #----combine all data to a dict
+            #temp_dict = {'train_loss_list':train_loss_list,'train_acc_list':train_acc_list,'test_acc_list':test_acc_list}
+            data_dict[name] = temp_dict
+
+            #----calculate data length
+            len_temp = np.zeros(len(extract_name_list),dtype=np.int32)
+            for idx,extract_name in enumerate(extract_name_list):
+                if extract_name in content.keys():
+                    len_temp[idx] = len(temp_dict[extract_name])
+
+
+            #----compare the data length(choose smaller length)
+            if count == 0:
+                len_vector = len_temp
+            else:
+                len_vector = np.minimum(len_vector,len_temp)
+
+    #----set the range
+    if set_x is not None:
+        set_num = np.ones_like(len_vector) * int(set_x)
+        len_vector = np.minimum(len_vector,set_num)
+
+    # ----plot loss results
+    plt.figure(figsize=(39, 5))
+
+    for idx, extract_name in enumerate(extract_name_list):
+        x_num = [i + 1 for i in range(len_vector[idx])]
+
+        plt.subplot(1, len(extract_name_list), idx+1)
+        for name in data_dict.keys():
+            content = data_dict[name][extract_name]
+            plt.plot(x_num,content[:len_vector[idx]] , label=name)
+            # plt.plot(x_num[:25],content[:25] , label=name)
+            plt.legend()
+            plt.xlabel("epoch")
+            plt.ylabel(y_axis_list[idx])
+            plt.title(extract_name_list[idx])
+    # ----show plots
+    plt.show()
+
+    # plt.legend()
+    # plt.ylabel("loss")
+    # plt.xlabel("epoch")
+    #
+    # # ----plot acc results
+    # plt.subplot(1, 2, 2)
+    # # plt.plot(x_num, train_acc_list, label="train_acc")
+    # if "test_img_dir" in content.keys():
+    #     plt.plot(x_num, test_acc_list, label="test_acc")
+    # plt.legend()
+    # plt.ylim((0.9, 0.98))  # 限制y軸的上下限
+    # plt.ylabel("accuracy")
+    # plt.xlabel("epoch")
 
 def img_mask(img_source, json_path, img_type='path',zoom_in_value=None):
 
@@ -2893,8 +3252,8 @@ if __name__ == "__main__":
     # file_transfer(path, cut_num_range=30, random_num_range=10)
 
     #----file decode
-    path = r"C:\Users\User\Desktop\train_result\infer_best_epoch112_0.0.2_.nst"
-    file_decode_v2(path,random_num_range=87)
+    # path = r"D:\code\model_saver\AE_Seg_132\train_result_0.nst"
+    # file_decode_v2(path,random_num_range=10)
 
     #----tools
     # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\20220517_PDAP_環光0.0.2Data\刮傷資料"
@@ -2921,7 +3280,7 @@ if __name__ == "__main__":
 
 
     #----get classnames id and color
-    # root_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle"
+    # root_dir = r"D:\dataset\optotech\009IRC-FB\classnames.txt"
     # root_dir = r"D:\dataset\optotech\silicon_division\PDAP\藥水殘(原圖+color圖+json檔)\L2_potion\classnames.txt"
     # class_names,class_name2id,id2class_name,id2color = get_classname_id_color(root_dir,print_out=True,save_dir=None)
 
@@ -2938,9 +3297,22 @@ if __name__ == "__main__":
     # img_mask(img_source, json_path,zoom_in_value=[75,77,88,88], img_type='path')
 
     #----check results
-    # dir_path = r"D:\code\model_saver\AE_Seg_123"
+    # dir_path = r"D:\code\model_saver\AE_Seg_133"
     # dir_path = r"C:\Users\User\Desktop\train_result"
-    # check_results(dir_path, encript_flag=True,epoch_range=None)
+    # dir_path = r"D:\code\model_saver\Opto_tech\CLS_PDAP_defect_20220112"
+    # only2see = ['seg_test_defect_recall_list']
+    # check_results(dir_path, encript_flag=False,epoch_range=None,only2see=only2see)
+
+    #----result comparison
+    result_dict = {
+        'AE_Seg_132': r'D:\code\model_saver\AE_Seg_132',
+        'AE_Seg_136': r'D:\code\model_saver\AE_Seg_136',
+    }
+    # extract_name_list = ['train_loss_list', 'test_loss_list']
+    extract_name_list = ['seg_train_loss_list', 'seg_test_loss_list']
+    y_axis_list = ['loss', 'loss']
+    result_comparison(result_dict, extract_name_list, y_axis_list, encript_flag=False)
+
 
     #----get_paths_labels
     # img_dir = r"C:\Users\User\Desktop\file_test"

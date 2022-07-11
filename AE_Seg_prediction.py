@@ -1,4 +1,4 @@
-import os,math,cv2,json,imgviz,time
+import os,math,cv2,json,imgviz,time,re
 import numpy as np
 import tensorflow
 import matplotlib.pyplot as plt
@@ -423,7 +423,9 @@ def image_similarity(img_dir,pb_path,node_dict,to_save_recon=False):
             say_sth(msg, print_out=True)
 
 def recon_seg_prediction(img_dir,pb_path,node_dict,to_save_predict_image=False,compare_with_label=False,
-                         to_save_defect_undetected=False,to_save_false_detected=False,acc_threshold=0.3,plt_arange='',prob_threshold=None):
+                         to_save_defect_undetected=False,to_save_false_detected=False,
+                         acc_threshold=0.3,plt_arange='',prob_threshold=None,cc_th=None,
+                         id2class_name_path=None):
     # ----var
     tf_tl = tf_utility()
     tf_tl.print_out = True
@@ -432,6 +434,8 @@ def recon_seg_prediction(img_dir,pb_path,node_dict,to_save_predict_image=False,c
     undetected_list = []
     falseDetected_list = []
     contour_cc_differ = list()
+    ok_count = 0
+    ng_count = 0
 
 
     # paths, json_paths, qty = tf_tl.get_subdir_paths_withJsonCheck(img_dir)
@@ -478,15 +482,20 @@ def recon_seg_prediction(img_dir,pb_path,node_dict,to_save_predict_image=False,c
         makedirs(make_dir_list)
 
         #----get classname2id, id2color(from train_results)
-        content = get_latest_json_content(os.path.dirname(pb_path))
-        if content is None:
-            msg = "couldn't find train_result json files"
-            say_sth(msg, print_out=True)
-            raise ValueError
-        # content取出來的id都是str，但是實際上使用是int，所以要再經過轉換
-        class_names = content['class_names']
-        class_name2id = dict_transform(content['class_name2id'], set_value=True)
-        id2color = dict_transform(content['id2color'], set_key=True)
+        if id2class_name_path is None:
+            content = get_latest_json_content(os.path.dirname(pb_path))
+            if content is None:
+                msg = "couldn't find train_result json files"
+                say_sth(msg, print_out=True)
+                raise ValueError
+            # content取出來的id都是str，但是實際上使用是int，所以要再經過轉換
+            class_names = content['class_names']
+            class_name2id = dict_transform(content['class_name2id'], set_value=True)
+            id2color = dict_transform(content['id2color'], set_key=True)
+        else:
+            class_names, class_name2id, id2class_name, id2color = get_classname_id_color(id2class_name_path, print_out=True,
+                                                                                         save_dir=None)
+
 
         tf_tl.class_name2id = class_name2id
         tf_tl.id2color = id2color
@@ -547,17 +556,17 @@ def recon_seg_prediction(img_dir,pb_path,node_dict,to_save_predict_image=False,c
             # predict_label = np.argmax(predict_label, axis=-1).astype(np.uint8)
 
             #----calculate the intersection and onion
-            seg_p.cal_intersection_union(predict_label, batch_label)
+            # seg_p.cal_intersection_union(predict_label, batch_label)
 
             #----calculate defects from label aspect by accuracy
-            t_list = seg_p.cal_label_defect_by_acc(predict_label, batch_label, paths=batch_paths, id2color=id2color)
-            if len(t_list):
-                undetected_list.extend(t_list)
+            # t_list = seg_p.cal_label_defect_by_acc(predict_label, batch_label, paths=batch_paths, id2color=id2color)
+            # if len(t_list):
+            #     undetected_list.extend(t_list)
 
             #----calculate defects from prediction aspect by accuracy
-            t_list = seg_p.cal_predict_defect_by_acc(predict_label, batch_label, paths=batch_paths, id2color=id2color)
-            if len(t_list):
-                falseDetected_list.extend(t_list)
+            # t_list = seg_p.cal_predict_defect_by_acc(predict_label, batch_label, paths=batch_paths, id2color=id2color)
+            # if len(t_list):
+            #     falseDetected_list.extend(t_list)
 
             batch_data *= 255
             batch_data = batch_data.astype(np.uint8)
@@ -568,11 +577,30 @@ def recon_seg_prediction(img_dir,pb_path,node_dict,to_save_predict_image=False,c
 
                 # ----label to color
                 zeros = np.zeros_like(batch_data[i])
+                ng_flag = False
                 for label_num in np.unique(predict_label[i]):
                     if label_num != 0:
-                        # print(label_num)
                         coors = np.where(predict_label[i] == label_num)
-                        zeros[coors] = tf_tl.id2color[label_num]
+                        predict_name = id2class_name[label_num]
+                        text_list = re.findall('ng', predict_name, re.I)
+                        #print("predict_name:",predict_name)
+                        if cc_th is None:
+                            zeros[coors] = tf_tl.id2color[label_num]
+                            if len(text_list):
+                                if ng_flag is False:
+                                    ng_flag = True
+                        else:
+                            if len(coors[0]) >= cc_th:
+                                zeros[coors] = tf_tl.id2color[label_num]
+                                if len(text_list):
+                                    if ng_flag is False:
+                                        ng_flag = True
+
+
+                        # print(label_num)
+
+
+
 
                         #----method 2
                         # max_probs = np.max(predict_softmax[i][coors], axis=-1)
@@ -583,6 +611,12 @@ def recon_seg_prediction(img_dir,pb_path,node_dict,to_save_predict_image=False,c
                         #
                         # if ratio > 0.9:
                         #     zeros[coors] = tf_tl.id2color[label_num]
+
+                #----ok,ng count
+                if ng_flag:
+                    ng_count += 1
+                else:
+                    ok_count += 1
 
 
 
@@ -629,10 +663,11 @@ def recon_seg_prediction(img_dir,pb_path,node_dict,to_save_predict_image=False,c
         print("ave time:", d_t / qty)
 
         #----statistics
-        iou, acc, all_acc = seg_p.cal_iou_acc()
-        defect_recall = seg_p.cal_defect_recall()
-        predict_sensitivity = seg_p.cal_defect_sensitivity()
+        # iou, acc, all_acc = seg_p.cal_iou_acc()
+        # defect_recall = seg_p.cal_defect_recall()
+        # predict_sensitivity = seg_p.cal_defect_sensitivity()
         # contour_cc_differ = np.array(contour_cc_differ)
+        print("ok count:{}, ng count:{}".format(ok_count,ng_count))
 
         #----save the log
         save_log(save_dir,'log.json',img_dir=img_dir,pb_path=pb_path,node_dict=node_dict,
@@ -646,18 +681,346 @@ def recon_seg_prediction(img_dir,pb_path,node_dict,to_save_predict_image=False,c
                  time=time.asctime())
 
 
-        print(class_names)
-        print("iou:", iou)
-        print("acc:", acc)
-        print("all_acc:", all_acc)
-        print("label defect stat:", seg_p.label_defect_stat)
-        print("defect recall:", defect_recall)
-        print("prediction defect stat:",seg_p.predict_defect_stat)
-        print("defect sensitivity:",seg_p.defect_sensitivity)
+        # print(class_names)
+        # print("iou:", iou)
+        # print("acc:", acc)
+        # print("all_acc:", all_acc)
+        # print("label defect stat:", seg_p.label_defect_stat)
+        # print("defect recall:", defect_recall)
+        # print("prediction defect stat:",seg_p.predict_defect_stat)
+        # print("defect sensitivity:",seg_p.defect_sensitivity)
 
-        # print("len of contour_cc_differ:", len(contour_cc_differ))
-        # print('average error pixels:', np.average(contour_cc_differ))
-        # print("std of average error pixels:", np.std(contour_cc_differ))
+
+def recon_seg_prediction_v2(img_dir,pb_path,node_dict,img_save_dict,threshold_dict,compare_with_answers=False,
+                         plt_arange='',
+                         id2class_name_path=None):
+    # ----var
+    tf_tl = tf_utility()
+    tf_tl.print_out = True
+    titles = ['prediction', 'answer']
+    batch_size = 1
+    undetected_list = []
+    falseDetected_list = []
+    ok_count = 0
+    ng_count = 0
+    to_save_predict_image = img_save_dict.get('to_save_predict_image')
+    to_save_defect_undetected = img_save_dict.get('to_save_defect_undetected')
+    to_save_false_detected = img_save_dict.get('to_save_false_detected')
+    img_compare_with_label = img_save_dict.get('img_compare_with_label')
+    img_compare_with_ori = img_save_dict.get('img_compare_with_ori')
+    acc_threshold = threshold_dict.get('acc_threshold')
+    prob_threshold = threshold_dict.get('prob_threshold')
+    cc_th = threshold_dict.get('cc_th')
+
+    if acc_threshold is None:
+        acc_threshold = 0.3
+        threshold_dict['acc_threshold'] = acc_threshold
+
+
+    # paths, json_paths, qty = tf_tl.get_subdir_paths_withJsonCheck(img_dir)
+    if isinstance(img_dir,list):
+        paths = list()
+        json_paths = list()
+        qty = 0
+        for dir_path in img_dir:
+            paths_temp, qty_temp = tf_tl.get_paths(dir_path)
+
+            if qty_temp > 0:
+                paths.extend(paths_temp.tolist())
+                qty += qty_temp
+                if compare_with_answers:
+                    json_paths_temp = tf_tl.get_relative_json_files(paths_temp)
+                    if len(json_paths_temp) > 0:
+                        json_paths.extend(json_paths_temp.tolist())
+
+    else:
+        paths, qty = tf_tl.get_paths(img_dir)
+        if compare_with_answers:
+            json_paths = tf_tl.get_relative_json_files(paths)
+
+    msg = "SEG圖片數量:{}".format(qty)
+    say_sth(msg, print_out=True)
+
+    if qty == 0:
+        msg = "No images are found!"
+        say_sth(msg, print_out=True)
+    else:
+        #----create save dir
+        make_dir_list = []
+        if isinstance(img_dir,list):
+            save_dir = os.path.join(img_dir[0], pb_path.split("\\")[-2])
+        else:
+            save_dir = os.path.join(img_dir, pb_path.split("\\")[-2])
+        make_dir_list.append(save_dir)
+
+        if to_save_predict_image:
+            save_dir4prediction_ok = os.path.join(save_dir, 'prediction','ok')
+            save_dir4prediction_ng = os.path.join(save_dir, 'prediction','ng')
+            make_dir_list.append(save_dir4prediction_ok)
+            make_dir_list.append(save_dir4prediction_ng)
+        if to_save_false_detected:
+            save_dir4false_detected = os.path.join(save_dir, 'false_detected')
+            make_dir_list.append(save_dir4false_detected)
+        if to_save_defect_undetected:
+            save_dir4defect_undetected = os.path.join(save_dir, 'defect_undetected')
+            make_dir_list.append(save_dir4defect_undetected)
+
+        makedirs(make_dir_list)
+
+        #----get classname2id, id2color(from train_results)
+        if id2class_name_path is None:
+            content = get_latest_json_content(os.path.dirname(pb_path))
+            if content is None:
+                msg = "couldn't find train_result json files"
+                say_sth(msg, print_out=True)
+                raise ValueError
+            # content取出來的id都是str，但是實際上使用是int，所以要再經過轉換
+            class_names = content['class_names']
+            class_name2id = dict_transform(content['class_name2id'], set_value=True)
+            id2color = dict_transform(content['id2color'], set_key=True)
+        else:
+            class_names, class_name2id, id2class_name, id2color = get_classname_id_color(id2class_name_path, print_out=True,
+                                                                                         save_dir=None)
+
+
+        tf_tl.class_name2id = class_name2id
+        tf_tl.id2color = id2color
+
+        #----Seg performance
+        if compare_with_answers:
+            seg_p = Seg_performance(len(class_names), print_out=True)
+            if to_save_defect_undetected:
+                seg_p.save_dir = save_dir4defect_undetected
+                seg_p.to_save_img_undetected = True
+            if to_save_false_detected:
+                seg_p.save_dir4falseDetected = save_dir4false_detected
+                seg_p.to_save_img_falseDetected = True
+            seg_p.reset_arg()
+            seg_p.reset_defect_stat(acc_threshold=acc_threshold)
+
+        #----start time
+        d_t = time.time()
+
+        tf_tl.sess, tf_tl.tf_dict = tf_tl.model_restore_from_pb(pb_path, node_dict)
+        tf_input = tf_tl.tf_dict['input']
+        tf_prediction = tf_tl.tf_dict['prediction']
+        tf_input_recon = tf_tl.tf_dict.get('input_recon')
+        tf_recon = tf_tl.tf_dict['recon']
+        tf_softmax = tf_tl.tf_dict['softmax_Seg']
+
+        model_shape = tf_tl.get_model_shape('input')
+
+        predict_ites_seg = math.ceil(qty / batch_size)
+
+
+        for idx_seg in range(predict_ites_seg):
+            # ----get batch paths
+            batch_paths = tf_tl.get_ite_data(paths, idx_seg, batch_size=batch_size)
+            batch_json_paths = tf_tl.get_ite_data(json_paths, idx_seg, batch_size=batch_size)
+
+            # ----get batch data
+            if compare_with_answers:
+                batch_data, batch_label = tf_tl.get_4D_img_label_data(batch_paths,
+                                                                      model_shape[1:],
+                                                                      json_paths=batch_json_paths,
+                                                                      )
+            else:
+                batch_data = tf_tl.get_4D_data(batch_paths, model_shape[1:])
+            # batch_data = tf_tl.get_4D_data(seg_paths,model_shape[1:])
+            feed_dict = {tf_input: batch_data}
+
+            batch_recon = tf_tl.sess.run(tf_recon, feed_dict=feed_dict)
+            if tf_input_recon is not None:
+                feed_dict[tf_input_recon] = batch_recon
+            predict_label = tf_tl.sess.run(tf_prediction,
+                                           feed_dict=feed_dict)  # ,tf_input_recon:batch_recon
+
+            predict_softmax = tf_tl.sess.run(tf_softmax,feed_dict=feed_dict)
+
+            #----method 1(prob_threshold)
+            if prob_threshold is not None and prob_threshold <= 1:
+                max_probs_batch = np.max(predict_softmax,axis=-1)
+                coors_prob = np.where(max_probs_batch < prob_threshold)
+                predict_label[coors_prob] = 0
+                # print("{} pixels are set 0".format(len(coors_prob[0])))
+
+            # predict_label = np.argmax(predict_label, axis=-1).astype(np.uint8)
+
+            if compare_with_answers:
+                #----calculate the intersection and onion
+                seg_p.cal_intersection_union(predict_label, batch_label)
+
+                #----calculate defects from label aspect by accuracy
+                t_list = seg_p.cal_label_defect_by_acc(predict_label, batch_label, paths=batch_paths, id2color=id2color)
+                if len(t_list):
+                    undetected_list.extend(t_list)
+
+                #----calculate defects from prediction aspect by accuracy
+                t_list = seg_p.cal_predict_defect_by_acc(predict_label, batch_label, paths=batch_paths, id2color=id2color)
+                if len(t_list):
+                    falseDetected_list.extend(t_list)
+
+            batch_data *= 255
+            batch_data = batch_data.astype(np.uint8)
+
+            for i in range(len(predict_label)):
+                img = batch_data[i]
+                # print(paths[batch_size * idx_seg + i])
+
+                # ----label to color
+                # zeros = np.zeros_like(batch_data[i])
+                zeros = img.copy()
+
+                ng_flag = False
+                map_sum = np.sum(predict_label[i])
+                if map_sum > 0:
+                    cc_nums, cc_map, stats, centroids = cv2.connectedComponentsWithStats(predict_label[i], connectivity=8)
+                    for cc_num in range(1, cc_nums):
+                        s = stats[cc_num]
+                        coors = np.where(cc_map == cc_num)
+                        predict_class = predict_label[i][coors][0]
+                        predict_name = id2class_name[predict_class]
+                        text_list = re.findall('ng', predict_name, re.I)
+                        if cc_th is None:
+                            zeros[coors] = tf_tl.id2color[predict_class]
+                            if len(text_list):
+                                if ng_flag is False:
+                                    ng_flag = True
+                        else:
+                            if s[-1] >= cc_th:
+                                zeros[coors] = tf_tl.id2color[predict_class]
+                                if len(text_list):
+                                    if ng_flag is False:
+                                        ng_flag = True
+            #----use unique numbers to handle
+            # for label_num in np.unique(predict_label[i]):
+            #     if label_num != 0:
+            #         coors = np.where(predict_label[i] == label_num)
+            #         predict_name = id2class_name[label_num]
+            #         text_list = re.findall('ng', predict_name, re.I)
+            #         if cc_th is None:
+            #             zeros[coors] = tf_tl.id2color[label_num]
+            #             if len(text_list):
+            #                 if ng_flag is False:
+            #                     ng_flag = True
+            #         else:
+            #             if len(coors[0]) >= cc_th:
+            #                 zeros[coors] = tf_tl.id2color[label_num]
+            #                 if len(text_list):
+            #                     if ng_flag is False:
+            #                         ng_flag = True
+            #
+            #
+            #         # print(label_num)
+            #
+            #
+            #
+            #
+            #         #----method 2
+            #         # max_probs = np.max(predict_softmax[i][coors], axis=-1)
+            #         #
+            #         # n = len(np.where(max_probs > 0.9)[0])
+            #         # ratio = n / len(max_probs)
+            #         # print("label_num:{},ratio:{}".format(label_num,ratio))
+            #         #
+            #         # if ratio > 0.9:
+            #         #     zeros[coors] = tf_tl.id2color[label_num]
+
+            #----ok,ng count
+                if ng_flag:
+                    ng_count += 1
+                else:
+                    ok_count += 1
+
+
+
+                #----set save dir for prediction images
+                if to_save_predict_image:
+                    # predict_png = cv2.addWeighted(img, 1, zeros, 0.5, 0)
+                    predict_png = zeros
+                    # ----create answer png
+                    show_imgs = [predict_png]
+                    path = paths[batch_size * idx_seg + i]
+                    if img_compare_with_ori:
+                        img_ori = cv2.imdecode(np.fromfile(path, dtype=np.uint8), 1)
+                        show_imgs.append(img_ori[:, :, ::-1])
+                        titles[-1] = 'original'
+                    if compare_with_answers:
+                        if img_compare_with_label is True:
+                            ext = path.split(".")[-1]
+                            json_path = path.strip(ext) + 'json'
+
+                            if os.path.exists(json_path):
+                                answer_png = tf_tl.get_single_label_png(path, json_path)
+                                show_imgs.append(answer_png)
+                            else:
+                                img_ori = cv2.imdecode(np.fromfile(path, dtype=np.uint8), 1)
+                                show_imgs.append(img_ori[:, :, ::-1])
+                                titles[-1] = 'original'
+
+                    if ng_flag:
+                        dir_path = save_dir4prediction_ng
+                    else:
+                        dir_path = save_dir4prediction_ok
+
+                    qty_show = len(show_imgs)
+                    if qty_show == 1:
+                        save_path = os.path.join(dir_path, path.split("\\")[-1])
+                        ext = "." + path.split("\\")[-1].split('.')[-1]
+                        # cv2.imwrite(save_path, show_imgs[0][:, :, ::-1])
+                        cv2.imencode(ext, show_imgs[0][:, :, ::-1])[1].tofile(save_path)
+                    else:
+                        plt.figure(num=1,figsize=(10 * qty_show, 5 * qty_show), clear=True)
+
+                        for j, show_img in enumerate(show_imgs):
+                            if plt_arange == 'vertical':
+                                plt.subplot(qty_show, 1, j + 1)
+                            else:
+                                plt.subplot(1, qty_show, j + 1)
+                            plt.imshow(show_img)
+                            plt.axis('off')
+                            plt.title(titles[j])
+
+                        save_path = os.path.join(dir_path, path.split("\\")[-1].split(".")[0] + '.jpg')
+                        plt.savefig(save_path)
+
+        d_t = time.time() - d_t
+        print("ave time:", d_t / qty)
+
+        #----statistics
+        if compare_with_answers:
+            iou, acc, all_acc = seg_p.cal_iou_acc()
+            defect_recall = seg_p.cal_defect_recall()
+            predict_sensitivity = seg_p.cal_defect_sensitivity()
+            print("classnames:",class_names)
+            print("iou:", iou)
+            print("acc:", acc)
+            print("all_acc:", all_acc)
+            print("label defect stat:", seg_p.label_defect_stat)
+            print("defect recall:", defect_recall)
+            print("prediction defect stat:", seg_p.predict_defect_stat)
+            print("defect sensitivity:", seg_p.defect_sensitivity)
+
+        print("ok count:{}, ng count:{}".format(ok_count,ng_count))
+
+        #----save the log
+        if compare_with_answers:
+            save_log(save_dir,'log.json',img_dir=img_dir,pb_path=pb_path,node_dict=node_dict,
+                     img_save_dict=img_save_dict, threshold_dict=threshold_dict,
+                     compare_with_answers=compare_with_answers, id2class_name_path=id2class_name_path,
+                     iou=iou.tolist(),acc=acc.tolist(), all_acc=all_acc.tolist(),
+                     label_defect_stat=seg_p.label_defect_stat.tolist(),
+                     defect_recall=defect_recall.tolist(),undetected_list=undetected_list,
+                     predict_defect_stat=seg_p.predict_defect_stat.tolist(),
+                     predict_sensitivity=predict_sensitivity.tolist(),falseDetected_list=falseDetected_list,
+                     time=time.asctime())
+        else:
+            save_log(save_dir, 'log.json', img_dir=img_dir, pb_path=pb_path, node_dict=node_dict,
+                     img_save_dict=img_save_dict,threshold_dict=threshold_dict,compare_with_answers=compare_with_answers,
+                     id2class_name_path=id2class_name_path,
+                     time=time.asctime())
+
+
 def infer_speed_test(img_dir,pb_path,node_dict,batch_size=1,set_img_num=1000):
     # ----var
     tf_tl = tf_utility()
@@ -795,8 +1158,12 @@ if __name__ == "__main__":
         # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2",
-        r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test',
+        # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test',
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\All_defects\髒污(屬OK)"
+        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\only_L2\L2_OK_無分類"
+        r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\L2_NG_all"
+        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\L2_OK_晶紋"
+        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\Seg\test"
     ]
     # img_dir = [
     #     r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\PD-55092G-AP_0.0.1_dataset\Seg_data\gold_particle\test",
@@ -805,27 +1172,66 @@ if __name__ == "__main__":
     # ]
     #
     # pb_path = r"D:\code\model_saver\AE_Seg_105\infer_best_epoch39.pb"
-    pb_path = r"C:\Users\User\Desktop\train_result\infer_best_epoch4_0.0.3_.pb"
+    # pb_path = r"C:\Users\User\Desktop\train_result\infer_best_epoch4_0.0.3_.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_009IRC-FB_Jane_20220627\infer_best_epoch171.nst"
+    # pb_path = r"D:\code\model_saver\AE_Seg_132\infer_best_epoch178.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_134\infer_20220706181231.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_136\infer_best_epoch183.pb"
+    pb_path = r"D:\code\model_saver\AE_Seg_136\infer_best_epoch174.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_109\infer_best_epoch3.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_106\infer_90.76.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_33\infer_best_epoch240.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_103\infer_best_epoch218.pb"
+
+    id2class_name_path = r"D:\dataset\optotech\009IRC-FB\classnames.txt"
     node_dict = {'input': 'input:0',
                  'recon':'output_AE:0',
                  'input_recon':'input_recon:0',
                  'prediction': 'predict_Seg:0',
                  'softmax_Seg': 'softmax_Seg:0'
                  }
-    prob_threshold = 0.3
-    recon_seg_prediction(img_dir, pb_path, node_dict,
-                         to_save_predict_image=True,
-                         to_save_false_detected=True,
-                         to_save_defect_undetected=True,
-                         compare_with_label=False,
-                         acc_threshold=0.3,
-                         prob_threshold=prob_threshold
-                         )
+    # prob_threshold = 0.9
+    # cc_th = None
+    # recon_seg_prediction(img_dir, pb_path, node_dict,
+    #                      id2class_name_path=id2class_name_path,
+    #                      to_save_predict_image=False,
+    #                      to_save_false_detected=False,
+    #                      to_save_defect_undetected=False,
+    #                      compare_with_label=False,
+    #                      acc_threshold=0.3,
+    #                      prob_threshold=prob_threshold,
+    #                      cc_th=cc_th
+    #                      )
     # infer_speed_test(img_dir, pb_path, node_dict,batch_size=1,set_img_num=1000)
+
+    compare_with_answers = False
+    img_save_dict = dict()
+    img_save_dict['to_save_predict_image'] = False
+    img_save_dict['to_save_false_detected'] = False
+    img_save_dict['to_save_defect_undetected'] = False
+    img_save_dict['img_compare_with_label'] = False
+    img_save_dict['img_compare_with_ori'] = False
+
+    threshold_dict = dict()
+    threshold_dict['prob_threshold'] = None
+    threshold_dict['cc_th'] = None
+    threshold_dict['acc_threshold'] = 0.3
+
+    recon_seg_prediction_v2(img_dir, pb_path, node_dict, img_save_dict, threshold_dict,
+                            compare_with_answers=compare_with_answers,
+                            id2class_name_path=id2class_name_path)
+
+    #----for loop
+    # prob_thresholds = [None,0.6,0.9]
+    # cc_ths = [30,50,70]
+    # for prob_threshold in prob_thresholds:
+    #     for cc_th in cc_ths:
+    #         threshold_dict['prob_threshold'] = prob_threshold
+    #         threshold_dict['cc_th'] = cc_th
+    #         recon_seg_prediction_v2(img_dir, pb_path, node_dict, img_save_dict, threshold_dict,
+    #                                 compare_with_answers=compare_with_answers,
+    #                                 id2class_name_path=id2class_name_path)
+    #         print("Above: results of prob_threshold:{},cc_th:{} ".format(prob_threshold,cc_th))
 
 
 

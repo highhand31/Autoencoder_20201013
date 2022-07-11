@@ -1,4 +1,4 @@
-import tensorflow
+import tensorflow,math
 # from inception_resnet_v1_reduction import inference as inception_resnet_v1_reduction
 import numpy as np
 
@@ -40,6 +40,8 @@ class PatchEmbedding():
         out_size = (H,W)
         num_patch = H * W
         net = tf.reshape(net,[-1,num_patch,self.embed_len])
+        print("PatchEmbedding shape:",net.shape)
+        print("out_size:",out_size)
 
         return net,out_size
 
@@ -62,6 +64,10 @@ def scaled_dot_product_attention(q, k, v, mask):
   """
 
   matmul_qk = tf.matmul(q, k, transpose_b=True)  # (..., seq_len_q, seq_len_k)
+  # print("q shape:", q.shape)
+  # print("k shape:", k.shape)
+  # print("v shape:", v.shape)
+  # print("matmul_qk shape:", matmul_qk.shape)
 
   # scale matmul_qk
   dk = tf.cast(tf.shape(k)[-1], tf.float32)
@@ -126,6 +132,7 @@ class MultiheadAttention():
         self.dense = tf.keras.layers.Dense(hidden_size)
         self.num_heads = num_heads
         self.hidden_size = hidden_size
+        self.sqrt_att_head_size = math.sqrt(num_heads)
 
     def split_heads(self, x):
         """Split the last dimension into (num_heads, depth).
@@ -134,6 +141,14 @@ class MultiheadAttention():
         x = tf.reshape(x,[-1,self.num_heads,x.shape[1].value//self.depth,self.depth])
 
         return x
+    def transpose_for_scores(self, x) :
+        # Reshape from [batch_size, seq_length, all_head_size] to [batch_size, seq_length, num_attention_heads, attention_head_size]
+        seq_length = x.shape[1].value
+        #print("seq_length:",seq_length)
+        tensor = tf.reshape(tensor=x, shape=(-1, seq_length, self.num_heads, self.depth))
+
+        # Transpose the tensor from [batch_size, seq_length, num_attention_heads, attention_head_size] to [batch_size, num_attention_heads, seq_length, attention_head_size]
+        return tf.transpose(tensor, perm=[0, 2, 1, 3])
 
     def __call__(self,tensor_q,tensor_k,tensor_v,mask=None):
         # batch_size = tensor_q.shape[0].value
@@ -141,30 +156,56 @@ class MultiheadAttention():
         q = self.query(tensor_q)  # (batch_size, num_patch, hidden_size)
         k = self.key(tensor_k) #(batch_size, num_patch, hidden_size)
         v = self.value(tensor_v) #(batch_size, num_patch, hidden_size)
+        print("(batch_size, num_patch, hidden_size)")
+        print("q shape:", q.shape)
+        print("k shape:", k.shape)
+        print("v shape:", v.shape)
 
-        q = self.split_heads(q)  # (batch_size, num_heads, hidden_size_q, depth)
-        k = self.split_heads(k)  # (batch_size, num_heads, hidden_size_k, depth)
-        v = self.split_heads(v)  # (batch_size, num_heads, hidden_size_v, depth)
+
+        # q = self.split_heads(q)  # (batch_size, num_heads, hidden_size_q, depth)
+        # k = self.split_heads(k)  # (batch_size, num_heads, hidden_size_k, depth)
+        # v = self.split_heads(v)  # (batch_size, num_heads, hidden_size_v, depth)
+        q = self.transpose_for_scores(q)  # (batch_size, num_heads, hidden_size_q, depth)
+        k = self.transpose_for_scores(k)  # (batch_size, num_heads, hidden_size_k, depth)
+        v = self.transpose_for_scores(v)  # (batch_size, num_heads, hidden_size_v, depth)
+        print("(batch_size, num_heads, hidden_size_q, depth)")
+        print("q shape:", q.shape)
+        print("k shape:", k.shape)
+        print("v shape:", v.shape)
 
         # scaled_attention.shape == (batch_size, num_heads, num_patch, depth)
         # attention_weights.shape == (batch_size, num_heads, num_patch, seq_len_k)
-        scaled_attention, attention_weights = scaled_dot_product_attention(
-            q, k, v, mask)
+        # scaled_attention, attention_weights = scaled_dot_product_attention(
+        #     q, k, v, mask)
+        attention_scores = tf.matmul(q, k, transpose_b=True)
+        dk = tf.cast(self.sqrt_att_head_size, dtype=attention_scores.dtype)
+        attention_scores = tf.divide(attention_scores, dk)
 
-        scaled_attention = tf.transpose(scaled_attention,
-                                        perm=[0, 2, 1, 3])  # (batch_size, num_patch, num_heads, depth)
+        # Normalize the attention scores to probabilities.
+        attention_probs = tf.nn.softmax(logits=attention_scores, axis=-1)#(batch_size, num_heads, num_patch, seq_len_k)
+        print("after q k dot product:", attention_probs.shape)
+        # Mask heads if we want to
+        if mask is not None:
+            attention_probs = tf.multiply(attention_probs, mask)
 
-        concat_attention = tf.reshape(scaled_attention,
+        attention_output = tf.matmul(attention_probs, v)
+        attention_output = tf.transpose(attention_output, perm=[0, 2, 1, 3])
+
+        concat_attention = tf.reshape(attention_output,
                                       (-1, num_patch, self.hidden_size))  # (batch_size, num_patch, hidden_size)
 
         output = self.dense(concat_attention)  # (batch_size, num_patch, hidden_size)
+        print("(batch_size, num_patch, hidden_size)")
+        print("attention_output shape:",output.shape)
 
-        return output, attention_weights
+        return output, attention_probs
 
 class EfficientMultiheadAttention():
-    def __init__(self,hidden_size: int = 768,num_heads: int = 1,sr_ratio: int = 1,rate=0.1):
+    def __init__(self,hidden_size: int = 768,num_heads: int = 1,sr_ratio: int = 1,dropout_keep_rate=0.9):
         self.attn = MultiheadAttention(hidden_size,num_heads)
-        self.dropout_layer = tf.keras.layers.Dropout(rate)
+        self.dropout_keep_rate = dropout_keep_rate
+        #self.dropout_layer = tf.keras.layers.Dropout(rate)
+
         self.sr_ratio = sr_ratio
         if sr_ratio > 1:
             self.sr = tf.keras.layers.Conv2D(hidden_size,sr_ratio,strides=sr_ratio)
@@ -173,10 +214,14 @@ class EfficientMultiheadAttention():
 
     def __call__(self,x, hw_shape, identity=None):
         x_q = x
+        print("inputs shpae:",x.shape)
         if self.sr_ratio > 1:
             x_kv = nlc_to_nhwc(x, hw_shape)
+            print("after nlc to nhwc:",x_kv.shape)
             x_kv = self.sr(x_kv)
+            print("after sr:",x_kv.shape)
             x_kv = nhwc_to_nlc(x_kv)
+            print("after nhwc to nlc:",x_kv.shape)
             x_kv = self.norm(x_kv)
         else:
             x_kv = x
@@ -193,7 +238,7 @@ class EfficientMultiheadAttention():
 
         out = self.attn(x_q, x_kv, x_kv)[0]
 
-        return identity + self.dropout_layer(out)
+        return identity + tf.nn.dropout(out, keep_prob=self.dropout_keep_rate)
 
 class MixFFN():
     """An implementation of MixFFN of Segformer.
@@ -219,12 +264,13 @@ class MixFFN():
     def __init__(self,
                  hidden_size,
                  feedforward_channels,
-                 ffn_drop=0.1,
+                 ffn_dropout_keep_ratio=0.9,
                 ):
         # self.embed_dims = embed_dims
         self.feedforward_channels = feedforward_channels
 
         in_channels = hidden_size
+        self.ffn_dropout_keep_ratio = ffn_dropout_keep_ratio
         # fc1 = Conv2d(
         #     in_channels=in_channels,
         #     out_channels=feedforward_channels,
@@ -251,7 +297,8 @@ class MixFFN():
         #     bias=True)
         self.fc2 = tf.keras.layers.Conv2D(in_channels, 1, strides=1)
         # drop = nn.Dropout(ffn_drop)
-        self.drop = tf.keras.layers.Dropout(ffn_drop)
+        # self.drop = tf.keras.layers.Dropout(ffn_drop)
+
 
     def __call__(self, x, hw_shape, identity=None):
         out = nlc_to_nhwc(x, hw_shape)
@@ -259,9 +306,9 @@ class MixFFN():
         out = self.pe_conv(out)
         # out = tf.keras.activations.gelu(out)
         out = tf.keras.activations.relu(out)
-        out = self.drop(out)
+        out = tf.nn.dropout(out, keep_prob=self.ffn_dropout_keep_ratio)
         out = self.fc2(out)
-        out = self.drop(out)
+        out = tf.nn.dropout(out, keep_prob=self.ffn_dropout_keep_ratio)
         out = nhwc_to_nlc(out)
         if identity is None:
             identity = x
@@ -271,20 +318,20 @@ class TransformerEncoderLayer():
     def __init__(self,hidden_size,
                  num_heads,
                  feedforward_channels,
-                 drop_rate=0.,
-                 attn_drop_rate=0.,
+                 ffn_dropout_keep_ratio=0.9,
+                 dropout_keep_rate=0.9,
                  sr_ratio=1,):
         self.norm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
         self.attn = EfficientMultiheadAttention(
             hidden_size=hidden_size,
             num_heads=num_heads,
-            rate=attn_drop_rate,
+            dropout_keep_rate=dropout_keep_rate,
             sr_ratio=sr_ratio)
         self.norm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
         self.ffn = MixFFN(
             hidden_size=hidden_size,
             feedforward_channels=feedforward_channels,
-            ffn_drop=drop_rate,
+            ffn_dropout_keep_ratio=ffn_dropout_keep_ratio,
             )
     def __call__(self, x, hw_shape):
         x = self.attn(self.norm1(x), hw_shape, identity=x)
@@ -343,8 +390,8 @@ class MixVisionTransformer():
                  out_indices=(0, 1, 2, 3),
                  mlp_ratio=4,
                  qkv_bias=True,
-                 drop_rate=0.,
-                 attn_drop_rate=0.,
+                 ffn_dropout_keep_ratio=1.0,
+                 dropout_keep_rate=1.0,
                  pretrained=None,
                  init_cfg=None,
                  with_cp=False):
@@ -388,8 +435,8 @@ class MixVisionTransformer():
                     hidden_size=embed_dims_i,
                     num_heads=num_heads[i],
                     feedforward_channels=mlp_ratio * embed_dims_i,
-                    drop_rate=drop_rate,
-                    attn_drop_rate=attn_drop_rate,
+                    ffn_dropout_keep_ratio=ffn_dropout_keep_ratio,
+                    dropout_keep_rate=dropout_keep_rate,
                     sr_ratio=sr_ratios[i])
                 layer.append(transF)
 
@@ -435,10 +482,11 @@ class MixVisionTransformer():
             print("Layer {}，patch_embedding shape:{}, hw_shape:{}".format(i,x, hw_shape))
             for block in layer[1]:
                 x = block(x, hw_shape)#TransformerEncoderLayer
-                print("Encoder shape:{}".format(x))
+
             x = layer[2](x) #norm
             #print("x shape:{}".format(x))
             x = nlc_to_nhwc(x, hw_shape)
+            print("Encoder shape:{}".format(x))
             if i in self.out_indices:
                 outs.append(x)
 
@@ -452,7 +500,7 @@ class MiTDecoder():
 
     def __call__(self,inputs):
         # Receive 4 stage backbone feature map: 1/4, 1/8, 1/16, 1/32
-        img_resize = (inputs[0].shape[1].value,inputs[0].shape[2].value)
+        img_resize = (inputs[0].shape[1].value*4,inputs[0].shape[2].value*4)
         net_list = []
 
         for x in inputs:
@@ -474,6 +522,91 @@ class MiTDecoder():
         net = tf.keras.layers.Conv2D(self.num_classes, 1)(net)
 
         return net
+
+class MitConcatOutput():
+    def __init__(self,inputs,h_min=6,print_out=False):
+        # h_min = inputs[-1].shape[1].value
+
+        out_qty = len(inputs)
+        pool_times = list()
+        for i in range(out_qty):
+            h = inputs[i].shape[1].value
+            temp = int(np.log2(h / h_min))
+            pool_times.append(temp)
+
+        #----info
+        if print_out:
+            print("The min output shape:",inputs[-1].shape)
+            for i in range(out_qty):
+                print("第{}個output shape:{}，需進行pool{}次".format(i,inputs[i].shape,pool_times[i]))
+
+        #----
+        self.inputs = inputs
+        self.pool_times = pool_times
+        self.out_qty = out_qty
+    def __call__(self,pool_type,kernel_size,filters=64,pool_size=2,activation=tf.keras.activations.relu,
+                 embed_length=128,dropout_keep_prob=None):
+        net_list = []
+
+        if pool_type == 'cnn':
+            stride = 2
+        else:
+            stride = 1
+        for i in range(self.out_qty):
+            if self.pool_times[i] == 0:
+                net_list.append(self.inputs[i])
+            else:
+                filters_c = self.inputs[i].shape[-1].value
+                for pool_idx in range(self.pool_times[i]):
+                    if pool_idx == 0:
+                        data_input = self.inputs[i]
+                    else:
+                        data_input = cnn_t
+
+                    #----cnn
+                    filters_c = int(filters_c * 0.8)
+                    print("filters_reduce:",filters_c)
+                    cnn_t = tf.keras.layers.Conv2D(filters_c,kernel_size,strides=stride,padding='same')(data_input)
+                    if activation is not None:
+                        cnn_t = activation(cnn_t)
+
+                    if pool_type == 'max':
+                        cnn_t = tf.keras.layers.MaxPool2D(pool_size=pool_size)(cnn_t)
+                    elif pool_type == 'ave':
+                        cnn_t = tf.keras.layers.AveragePooling2D(pool_size=pool_size)(cnn_t)
+
+                # print(cnn_t.shape)
+                net_list.append(cnn_t)
+
+        #----cnn of last output
+        # cnn_t = tf.keras.layers.Conv2D(filters, kernel_size, strides=1, padding='same')(self.inputs[-1])
+        # if activation is not None:
+        #     cnn_t = activation(cnn_t)
+        # net_list.append(cnn_t)
+
+        net = tf.concat(net_list,axis=-1)
+        print("net shape:",net.shape)
+
+        #----
+        net = tf.keras.layers.Conv2D(filters, kernel_size, strides=1, padding='same')(net)
+        print("net shape:", net.shape)
+
+        #----flatten
+        net = tf.keras.layers.Flatten()(net)
+
+        if dropout_keep_prob is not None:
+            net = tf.nn.dropout(net, keep_prob=dropout_keep_prob)
+
+        net = tf.keras.layers.Dense(embed_length)(net)
+        print("output shape:", net.shape)
+
+        return net
+
+
+
+
+
+
 
 
 
