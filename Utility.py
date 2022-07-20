@@ -176,7 +176,10 @@ class Seg_performance():
         h,w = batch_label.shape[1:]
         undetected_list = list()
 
-        for predict,label in zip(batch_predict,batch_label):
+        for predict, label in zip(batch_predict,batch_label):
+            # ----find out unique numbers
+            p_defect_classes = np.unique(predict)
+            l_defect_classes = np.unique(label)
 
             #----connected components
             # cc_t = time.time()
@@ -201,6 +204,20 @@ class Seg_performance():
                 self.label_defect_stat[defect_class][0] += 1
                 if acc_t >= self.acc_threshold:
                     self.label_defect_stat[defect_class][1] += 1
+                    # print("label_defect acc_t:",acc_t)
+                    #----show image
+                    # img_ans = np.where(label_map == label_num,255,0).astype(np.uint8)
+                    # logi_and = logi_and.astype(np.uint8)
+                    # logi_and *= 255
+                    #
+                    # plt.subplot(1,2,1)
+                    # plt.imshow(img_ans, cmap='gray')
+                    # plt.title('answer')
+                    # plt.subplot(1, 2, 2)
+                    # plt.imshow(logi_and,cmap='gray')
+                    # plt.title(acc_t)
+                    #
+                    # plt.show()
                 else:#save images
                     if self.to_save_img_undetected and self.save_dir is not None:
                         if paths is not None and id2color is not None:
@@ -235,6 +252,159 @@ class Seg_performance():
 
         return undetected_list
 
+    def cal_label_defect_by_acc_v2(self,batch_predict,batch_label,paths=None,id2color=None):
+        # ----var
+        count = 0
+        h, w = batch_label.shape[1:]
+        undetected_list = list()
+
+        for predict, label in zip(batch_predict, batch_label):
+            # ----find out unique numbers
+            # p_defect_classes = np.unique(predict)
+            l_defect_classes = np.unique(label)
+
+            intersect = (predict == label)
+
+            for l_defect_class in l_defect_classes:
+                #----
+                if l_defect_class == 0:#the background  -->no need to cc
+                    self.label_defect_stat[l_defect_class][0] += 1
+                    zeros_p = np.where(predict == l_defect_class,True,False)
+                    zeros_l = np.where(label == l_defect_class,True,False)
+                    logi_and = np.logical_and(zeros_p, zeros_l)
+                    sum_logi_and = np.sum(logi_and)
+                    acc_t = sum_logi_and / np.sum(zeros_l)
+                    if acc_t >= self.acc_threshold:
+                        self.label_defect_stat[l_defect_class][1] += 1
+                        # print("label_defect:{},acc_t:{}".format(l_defect_class,acc_t))
+                else:
+                    label_t = np.where(label == l_defect_class, 1, 0).astype(np.uint8)
+                    l_cc_nums, l_cc_map, l_stats, l_centroids = cv2.connectedComponentsWithStats(label_t,
+                                                                                                 connectivity=8)
+                    self.label_defect_stat[l_defect_class][0] += (l_cc_nums - 1)
+                    for l_cc_num in range(1, l_cc_nums):
+                        s = l_stats[l_cc_num]
+                        coors = np.where(l_cc_map == l_cc_num)
+                        zeros_l = np.where(l_cc_map == l_cc_num, True, False)
+                        logi_and = np.logical_and(zeros_l, intersect)
+                        sum_logi_and = np.sum(logi_and)
+                        acc_t = sum_logi_and / s[-1]
+                        if acc_t >= self.acc_threshold:
+                            self.label_defect_stat[l_defect_class][1] += 1
+                            # print("label_defect:{},acc_t:{}".format(l_defect_class,acc_t))
+                            # ----show image
+                            # img_ans = np.where(label_map == label_num,255,0).astype(np.uint8)
+                            # logi_and = logi_and.astype(np.uint8)
+                            # logi_and *= 255
+                            #
+                            # plt.subplot(1,2,1)
+                            # plt.imshow(img_ans, cmap='gray')
+                            # plt.title('answer')
+                            # plt.subplot(1, 2, 2)
+                            # plt.imshow(logi_and,cmap='gray')
+                            # plt.title(acc_t)
+                            #
+                            # plt.show()
+                        else:  # save images
+                            if self.to_save_img_undetected and self.save_dir is not None:
+                                if paths is not None and id2color is not None:
+                                    img = cv2.imdecode(np.fromfile(paths[count], dtype=np.uint8), 1)
+                                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                                    img = cv2.resize(img, (w, h))
+                                    # ----label range(rectangle)
+                                    color = id2color[l_defect_class]
+                                    # cv2.rectangle(img, (s[0], s[1]), (s[0] + s[2], s[1] + s[3]), color, 1)
+                                    img[coors] = color
+                                    # ----predict range(dye)
+                                    if sum_logi_and > 0:
+                                        coors_predict = np.where(logi_and == True)
+                                        img[coors_predict] = 255 - np.array(color)
+                                    undetected_list.append([paths[count], int(sum_logi_and), int(s[-1])])
+                                    # print("path:{}\npredict / label pixels: {}/{}\n".format(paths[count],sum_logi_and,s[-1]))
+
+                                    # 建議不寫字，因為當瑕疵位於圖片右邊角，會需要寫更多if else來標註文字
+                                    # cv2.putText(img, "defect number:{}".format(defect_class), (s[0] + s[2], s[1] + s[3]),
+                                    #             cv2.FONT_HERSHEY_SIMPLEX, 0.5,#FONT_HERSHEY_SIMPLEX #FONT_HERSHEY_PLAIN
+                                    #             (255, 255, 255), 1)
+                                    splits = paths[count].split("\\")[-1].split(".")
+                                    save_path = os.path.join(self.save_dir,
+                                                             splits[0] + "_ratio_{}_{}.".format(sum_logi_and, s[-1]) +
+                                                             splits[
+                                                                 -1])
+                                    # cv2.imwrite(save_path,img[:,:,::-1])
+                                    cv2.imencode('.{}'.format(splits[-1]), img[:, :, ::-1])[1].tofile(save_path)
+
+        return undetected_list
+
+    def cal_label_defect_by_acc_vTest2(self,batch_predict,batch_label,paths=None,id2color=None):
+        #----var
+        count = 0
+        h,w = batch_label.shape[1:]
+        undetected_list = list()
+
+        for predict, label in zip(batch_predict,batch_label):
+
+            for defect_class in np.unique(label):
+                if defect_class != 0:
+                    label_t = np.where(label == defect_class,1,0).astype(np.uint8)
+
+                    #----connected components
+                    # cc_t = time.time()
+                    label_nums, label_map, stats, centroids = cv2.connectedComponentsWithStats(label_t, connectivity=8)
+                    # print("label_nums:{},contour number:{}".format(label_nums,len(contours)))
+
+                    intersect = (predict == label)
+                    zeros = np.zeros_like(label).astype('bool')
+                    # cc_qty = 0
+                    for label_num in range(1, label_nums):
+                        s = stats[label_num]
+                        # if label_num != 0:
+                        coors = np.where(label_map == label_num)
+                        zeros[coors] = True
+                        logi_and = np.logical_and(zeros, intersect)
+                        sum_logi_and = np.sum(logi_and)
+                        acc_t = sum_logi_and / s[-1]
+                        # if label_num > 0:
+                        #     cc_qty += s[-1]
+                            # print("CC area:",s[-1])
+                        # defect_class = label[coors][0]
+                        self.label_defect_stat[defect_class][0] += 1
+                        if acc_t >= self.acc_threshold:
+                            self.label_defect_stat[defect_class][1] += 1
+                        else:#save images
+                            if self.to_save_img_undetected and self.save_dir is not None:
+                                if paths is not None and id2color is not None:
+                                    img = cv2.imdecode(np.fromfile(paths[count],dtype=np.uint8),1)
+                                    img = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
+                                    img = cv2.resize(img,(w,h))
+                                    #----label range(rectangle)
+                                    color = id2color[defect_class]
+                                    # cv2.rectangle(img, (s[0], s[1]), (s[0] + s[2], s[1] + s[3]), color, 1)
+                                    img[coors] = color
+                                    #----predict range(dye)
+                                    if sum_logi_and > 0:
+                                        coors_predict = np.where(logi_and == True)
+                                        img[coors_predict] = 255 - np.array(color)
+                                    undetected_list.append([paths[count],int(sum_logi_and),int(s[-1])])
+                                    #print("path:{}\npredict / label pixels: {}/{}\n".format(paths[count],sum_logi_and,s[-1]))
+
+
+                                    #建議不寫字，因為當瑕疵位於圖片右邊角，會需要寫更多if else來標註文字
+                                    # cv2.putText(img, "defect number:{}".format(defect_class), (s[0] + s[2], s[1] + s[3]),
+                                    #             cv2.FONT_HERSHEY_SIMPLEX, 0.5,#FONT_HERSHEY_SIMPLEX #FONT_HERSHEY_PLAIN
+                                    #             (255, 255, 255), 1)
+                                    splits = paths[count].split("\\")[-1].split(".")
+                                    save_path = os.path.join(self.save_dir,splits[0] + "_ratio_{}_{}.".format(sum_logi_and,s[-1]) + splits[-1])
+                                    # cv2.imwrite(save_path,img[:,:,::-1])
+                                    cv2.imencode('.{}'.format(splits[-1]), img[:, :, ::-1])[1].tofile(save_path)
+
+                        # ----reset
+                        zeros[coors] = False
+
+                    count += 1
+
+        return undetected_list
+
     def cal_predict_defect_by_acc(self, batch_predict, batch_label, paths=None, id2color=None):
         # ----var
         count = 0
@@ -243,42 +413,66 @@ class Seg_performance():
 
         for predict, label in zip(batch_predict, batch_label):
 
+            #----show images
+            # img_p = np.where(predict>0,255,0).astype(np.uint8)
+            # img_l = np.where(label>0,255,0).astype(np.uint8)
+            # plt.subplot(1,2,1)
+            # plt.imshow(img_p,cmap='gray')
+            # plt.title('prediction')
+            # plt.subplot(1,2,2)
+            # plt.imshow(img_l,cmap='gray')
+            # plt.title('label')
+            # plt.show()
             # ----connected components
             # cc_t = time.time()
             p_label_nums, p_label_map, p_stats, p_centroids = cv2.connectedComponentsWithStats(predict, connectivity=8)
             # print("label_nums:{},contour number:{}".format(label_nums,len(contours)))
 
             #intersect = (predict == label)
-            predict_map = np.zeros_like(predict).astype('bool')
+            # predict_map = np.zeros_like(predict).astype('bool')
 
-            for p_label_num in range(1, p_label_nums):
+            for p_label_num in range(0, p_label_nums):
                 #s = stats[p_label_num]
                 # if label_num != 0:
                 p_coors = np.where(p_label_map == p_label_num)
-                predict_map[p_coors] = True
+                # predict_map = np.zeros_like(predict).astype('bool')
+                # predict_map[p_coors] = True
+                predict_map = np.where(p_label_map == p_label_num,True,False)
                 # zeros[coors] = True
                 # logi_and = np.logical_and(zeros, intersect)
                 # sum_logi_and = np.sum(logi_and)
                 # acc_t = sum_logi_and / s[-1]
 
                 predict_defect_class = predict[p_coors][0]
-                label_t = np.where(label == predict_defect_class,predict_defect_class,0).astype(np.uint8)
+                #----test
+                # label_t2 = np.where(label == predict_defect_class, 1, 0).astype(bool)
+                # logi_and = np.logical_and(label_t2, predict_map)
+                # sum_logi_and = np.sum(logi_and)
+                # acc_t = sum_logi_and / s[-1]
+                #----
+                # label_t = np.where(label == predict_defect_class,predict_defect_class,0).astype(np.uint8)
+                label_t = np.where(label == predict_defect_class,1,0).astype(np.uint8)
                 l_label_nums, l_label_map, l_stats, l_centroids = cv2.connectedComponentsWithStats(label_t, connectivity=8)
 
-                label_map = np.zeros_like(label).astype('bool')
+                # label_map = np.zeros_like(label).astype('bool')
                 for l_label_num in range(1, l_label_nums):
                     s = l_stats[l_label_num]
-                    l_coors = np.where(l_label_map == l_label_num)
-
-                    label_map[l_coors] = True
+                    # label_map = np.zeros_like(label).astype('bool')
+                    # l_coors = np.where(l_label_map == l_label_num)
+                    # label_map[l_coors] = True
+                    label_map = np.where(l_label_map == l_label_num,True,False)
                     logi_and = np.logical_and(label_map, predict_map)
                     sum_logi_and = np.sum(logi_and)
                     acc_t = sum_logi_and / s[-1]
+
+                    # ----reset
+                    # label_map[l_coors] = False
+
                     if acc_t >= self.acc_threshold:
                         self.predict_defect_stat[predict_defect_class][1] += 1
+                        print("predict_defect acc_t:", acc_t)
                         break
-                    #----reset
-                    label_map[l_coors] = False
+
 
 
                 self.predict_defect_stat[predict_defect_class][0] += 1
@@ -313,9 +507,59 @@ class Seg_performance():
                 #         cv2.imencode('.{}'.format(splits[-1]), img[:, :, ::-1])[1].tofile(save_path)
 
                 # ----reset
-                predict_map[p_coors] = False
+                # predict_map[p_coors] = False
 
             count += 1
+
+        return falseDetected_list
+
+    def cal_predict_defect_by_acc_v2(self, batch_predict, batch_label, paths=None, id2color=None):
+        # ----var
+        h, w = batch_label.shape[1:]
+        falseDetected_list = list()
+
+        for predict, label in zip(batch_predict, batch_label):
+
+            #----find out unique numbers
+            p_defect_classes = np.unique(predict)
+            l_defect_classes = np.unique(label)
+
+            for p_defect_class in p_defect_classes:
+                if p_defect_class == 0:#the background  -->no need to cc
+                    self.predict_defect_stat[p_defect_class][0] += 1
+                    zeros_p = np.where(predict == p_defect_class,True,False)
+                    zeros_l = np.where(label == p_defect_class,True,False)
+                    logi_and = np.logical_and(zeros_p, zeros_l)
+                    sum_logi_and = np.sum(logi_and)
+                    acc_t = sum_logi_and / np.sum(zeros_l)
+                    if acc_t >= self.acc_threshold:
+                        self.predict_defect_stat[p_defect_class][1] += 1
+                        # print("predict_defect:{},acc_t:{}".format(p_defect_class,acc_t))
+                else:
+                    predict_t = np.where(predict == p_defect_class, 1, 0).astype(np.uint8)
+                    p_cc_nums, p_cc_map, p_stats, p_centroids = cv2.connectedComponentsWithStats(predict_t, connectivity=8)
+
+                    self.predict_defect_stat[p_defect_class][0] += (p_cc_nums - 1)
+
+                    if p_defect_class in l_defect_classes:
+
+                        label_t = np.where(label == p_defect_class,1,0).astype(np.uint8)
+
+                        l_cc_nums, l_cc_map, l_stats, l_centroids = cv2.connectedComponentsWithStats(label_t, connectivity=8)
+
+                        for p_cc_num in range(1, p_cc_nums):
+                            zeros_p = np.where(p_cc_map == p_cc_num,True,False)
+
+                            for l_cc_num in range(1, l_cc_nums):
+                                zeros_l = np.where(l_cc_map == l_cc_num,True,False)
+
+                                logi_and = np.logical_and(zeros_p,zeros_l)
+                                sum_logi_and = np.sum(logi_and)
+                                acc_t = sum_logi_and / l_stats[l_cc_num][-1]
+                                if acc_t >= self.acc_threshold:
+                                    self.predict_defect_stat[p_defect_class][1] += 1
+                                    # print("predict_defect:{},acc_t:{}".format(p_defect_class, acc_t))
+                                    break
 
         return falseDetected_list
 
@@ -1080,9 +1324,22 @@ class tools():
 
                 #----resize and change the color format
                 img = cv2.resize(img, (output_shape[1], output_shape[0]))
-                # lbl = cv2.resize(lbl, (output_shape[1], output_shape[0]))
+
+                #----show the lbl image(before and after resize)
+                # img_lbl = np.where(lbl > 0,255,0).astype(np.uint8)
+
                 lbl = self.resize_label(lbl,(output_shape[1], output_shape[0]), to_process=to_process,
                                         rdm_angle=self.p_dict.get('rdm_angle'),M=M)
+
+
+                # img_lbl_r = np.where(lbl > 0,255,0).astype(np.uint8)
+                # plt.subplot(1,2,1)
+                # plt.imshow(img_lbl, cmap='gray')
+                # plt.title('label before resize')
+                # plt.subplot(1, 2, 2)
+                # plt.imshow(img_lbl_r, cmap='gray')
+                # plt.title('label after resize')
+                # plt.show()
 
                 if to_gray is True:
                     img = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
@@ -1571,7 +1828,6 @@ class tools():
             plt.show()
 
         return img_result,zeros
-
 
     def get_perlin_noise(self,shape,res=(16,16)):
         a = generate_perlin_noise_2d(
@@ -2611,7 +2867,8 @@ def check_results(dir_path,encript_flag=False,epoch_range=None,only2see=None):
                       'seg_train_loss_list','seg_test_loss_list',
                       'seg_train_iou_list','seg_test_iou_list',
                       'seg_train_acc_list','seg_test_acc_list',
-                      'seg_train_defect_recall_list','seg_test_defect_recall_list']
+                      'seg_train_defect_recall_list','seg_test_defect_recall_list',
+                      'seg_train_defect_sensitivity_list','seg_test_defect_sensitivity_list']
     tailer = '.json'
     qty_plot = 2
     class_names = None
@@ -2726,6 +2983,12 @@ def check_results(dir_path,encript_flag=False,epoch_range=None,only2see=None):
                 elif data_name.find('test_defect_recall') >= 0:
                     data_dict[data_name] = np.array(data_list).astype(np.float16).T
                     plot_type.append('seg|test_defect_recall')
+                elif data_name.find('train_defect_sensitivity') >= 0:
+                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
+                    plot_type.append('seg|train_defect_sensitivity')
+                elif data_name.find('test_defect_sensitivity') >= 0:
+                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
+                    plot_type.append('seg|test_defect_sensitivity')
 
             else:
                 if data_name.find('loss') >= 0:
@@ -2798,7 +3061,7 @@ def check_results(dir_path,encript_flag=False,epoch_range=None,only2see=None):
                 if data_name.find('seg') >= 0:
                     if len(re.findall(show_name, data_name, re.I)) > 1:
                         print(data_name)
-                        if len(re.findall("iou|acc|defect_recall", data_name, re.I)) == 1:
+                        if len(re.findall("iou|acc|defect_recall|defect_sensitivity", data_name, re.I)) == 1:
                             for i, value in enumerate(data_show):
                                 plt.plot(x_num, value, label=class_names[i])
                         # if data_name.find('iou') >= 0:
@@ -3297,21 +3560,21 @@ if __name__ == "__main__":
     # img_mask(img_source, json_path,zoom_in_value=[75,77,88,88], img_type='path')
 
     #----check results
-    # dir_path = r"D:\code\model_saver\AE_Seg_133"
+    # dir_path = r"D:\code\model_saver\AE_Seg_141"
     # dir_path = r"C:\Users\User\Desktop\train_result"
     # dir_path = r"D:\code\model_saver\Opto_tech\CLS_PDAP_defect_20220112"
-    # only2see = ['seg_test_defect_recall_list']
-    # check_results(dir_path, encript_flag=False,epoch_range=None,only2see=only2see)
+    # only2see = ['seg_test_defect_sensitivity_list']
+    # check_results(dir_path, encript_flag=False,epoch_range=None,only2see=None)
 
     #----result comparison
-    result_dict = {
-        'AE_Seg_132': r'D:\code\model_saver\AE_Seg_132',
-        'AE_Seg_136': r'D:\code\model_saver\AE_Seg_136',
-    }
-    # extract_name_list = ['train_loss_list', 'test_loss_list']
-    extract_name_list = ['seg_train_loss_list', 'seg_test_loss_list']
-    y_axis_list = ['loss', 'loss']
-    result_comparison(result_dict, extract_name_list, y_axis_list, encript_flag=False)
+    # result_dict = {
+    #     'AE_Seg_137': r'D:\code\model_saver\AE_Seg_137',
+    #     'AE_Seg_139': r'D:\code\model_saver\AE_Seg_139',
+    # }
+    # # extract_name_list = ['train_loss_list', 'test_loss_list']
+    # extract_name_list = ['seg_test_defect_recall_list', 'seg_test_defect_sensitivity_list']
+    # y_axis_list = ['loss', 'loss']
+    # result_comparison(result_dict, extract_name_list, y_axis_list, encript_flag=False)
 
 
     #----get_paths_labels
@@ -3343,6 +3606,65 @@ if __name__ == "__main__":
     #         new_path = path.split("\\")[-1]
     #         new_path = os.path.join(save_dir, new_path)
     #         shutil.copy(path, new_path)
+
+    #----check label
+    # json_dir = r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\Seg\test"
+    json_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test"
+    # root_dir = r"D:\dataset\optotech\009IRC-FB\classnames.txt"
+    root_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
+    resize = (512,512)
+    class_names,class_name2id,id2class_name,id2color = get_classname_id_color(root_dir,print_out=True,save_dir=None)
+
+    count = 0
+    tl = tools(print_out=True)
+    paths = [file.path for file in os.scandir(json_dir) if file.name.split(".")[-1] == 'json']
+    qty = len(paths)
+
+    if len(paths) == 0:
+        print("No json files")
+    else:
+        for path in paths :
+            with open(path,'r',encoding='utf8') as f:
+                content = json.load(f)
+                h = content['imageHeight']
+                w = content['imageWidth']
+
+            label_shapes = tl.get_label_shapes(path)
+            if label_shapes is None:
+                continue
+            try:
+                lbl = tl.shapes_to_label(
+                    img_shape=[h,w,3],
+                    shapes=label_shapes,
+                    label_name_to_value=class_name2id,
+                )
+                num_list_1 = list(np.unique(lbl))
+
+                lbl_r = cv2.resize(lbl,resize,interpolation=cv2.INTER_NEAREST)
+
+                num_list_2 = list(np.unique(lbl_r))
+
+                if num_list_1 == num_list_2:
+                    count += 1
+                elif len(num_list_2) < len(num_list_1):#有可能因為resize後過小，導致一些pixel數值消失
+                    wrong_flag = False
+                    for num in num_list_2:
+                        if num not in num_list_1:
+                            wrong_flag = True
+                            break
+                    if wrong_flag is False:
+                        count += 1
+                else:
+                    print("before unique numbers:",num_list_1)
+                    print("after unique numbers:",num_list_2)
+            except:
+                print("label Error:", path)
+
+
+    print("unique numbers identical ratio:",count / qty)
+
+
+
 
 
 

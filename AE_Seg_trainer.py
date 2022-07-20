@@ -15,7 +15,7 @@ def get_AE_arg(**kwargs):
     # ae_var['recon_img_dir'] = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\recon_img"
     # # ====model init
     # ae_var['model_shape'] = [None, 512, 832, 3]#[None,544,832,3]
-    ae_var['infer_method'] = "mit_b0"#"AE_pooling_net_V7"  # "AE_JNet"#"AE_transpose_4layer",mit_b0
+    ae_var['infer_method'] = "AE_pooling_net_V7"#"AE_pooling_net_V7"  # "AE_JNet"#"AE_transpose_4layer",mit_b0
     ae_var['encode_dict'] = {
         'kernel_list': [7, 5, 5, 5, 3, 3, 3],
         'filter_list': [16, 24, 32, 40, 48, 56, 64],
@@ -76,7 +76,7 @@ def get_SEG_arg(**kwargs):
     #                                ]
     # seg_var['predict_img_dir'] = [r'D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\predict_img']
     seg_var['to_train_w_AE_paths'] = False
-    seg_var['infer_method'] = "Seg_pooling_net_V8"#'Seg_pooling_net_V4'#'mit_b0'#'Seg_pooling_net_V4'#'Seg_DifNet'
+    seg_var['infer_method'] = "Seg_pooling_net_V4"#'Seg_pooling_net_V4'#'mit_b0'#'Seg_pooling_net_V4'#'Seg_DifNet'
     seg_var['encode_dict'] = {
         "first_layer": {
             "type": "dilated_downSampling",
@@ -84,11 +84,11 @@ def get_SEG_arg(**kwargs):
             "filter": 8,
             "ratio": [1, 2, 5]
         },
-        'kernel_list': [3, 3, 3, 3],
-        'filter_list': [32, 48, 64, 80],
-        'stride_list': [2, 2, 2, 2],
-        'pool_type_list': ['cnn'],
-        'pool_kernel_list': [5, 5, 5, 5],
+        'kernel_list': [3]*3,#[5, 5, 5, 5],
+        'filter_list': [32, 48, 64],#[48, 64, 80, 96],
+        'stride_list': [2]*3,#[2, 2, 2, 2],
+        'pool_type_list': ['max'],
+        'pool_kernel_list': [5]*3,#[5, 5, 5, 5],
         'multi_ratio': 2,
         # 'kernel_list': [7, 5, 5, 5, 3, 3, 3],
         # 'filter_list': [16, 24, 32, 40, 48, 56, 64],
@@ -105,9 +105,9 @@ def get_SEG_arg(**kwargs):
         # 'stride_list': [2, 2, 2, 2, 2, 2, 2],
         # 'pool_type_list': ['max'],
         'cnn_type':'',
-        'kernel_list': [3, 3, 3, 3],
-        'filter_list': [80, 64, 48, 32],
-        'stride_list': [2, 2, 2, 2],
+        'kernel_list': [3]*3,#[5, 5, 5, 5],
+        'filter_list': [64, 48, 32],#[96, 80, 64, 48],
+        'stride_list': [2]*3,#[2, 2, 2, 2],
         'multi_ratio': 2,
     }
     # seg_var['rot'] = True
@@ -121,7 +121,7 @@ def get_SEG_arg(**kwargs):
     # ====train
     seg_var['ratio'] = 1.0
     seg_var['batch_size'] = 1
-    seg_var['setting_dict'] = {'rdm_shift': 0.05, 'rdm_angle': 5}
+    seg_var['setting_dict'] = {'rdm_shift': 0.1, 'rdm_angle': 10}
 
     seg_var['process_dict'] = {"rdm_flip": True,
                                'rdm_br': True,
@@ -169,44 +169,51 @@ def get_commom_arg(**kwargs):
 if __name__ == "__main__":
     #----AE args
     train_img_dir = [
-        r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\training\L1_OK_無分類",
-        r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\training\L2_OK_無分類",
-        r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\training\L4_OK_無分類"
+        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\training\L1_OK_無分類",
+        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\training\L2_OK_無分類",
+        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\training\L4_OK_無分類"
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\train\OK",
-        # r"D:\dataset\optotech\009IRC-FB\AE\train",
+        r"D:\dataset\optotech\009IRC-FB\AE\train",
         # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\training\L2_OK_晶紋"
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\ok_parts_train"
 
     ]
     test_img_dir = [
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\test\OK",
-        # r"D:\dataset\optotech\009IRC-FB\AE\test",
+        r"D:\dataset\optotech\009IRC-FB\AE\test",
         # r"D:\dataset\optotech\009IRC-FB\AE\test_L1_L2_L4",
-        r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\validation\L1_OK_無分類",
-        r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\validation\L2_OK_無分類",
-        r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\validation\L4_OK_無分類",
+        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\validation\L1_OK_無分類",
+        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\validation\L2_OK_無分類",
+        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\validation\L4_OK_無分類",
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\ok_parts_test"
     ]
-    recon_img_dir = r"D:\dataset\optotech\009IRC-FB\AE\recon4train"
+    # recon_img_dir = r"D:\dataset\optotech\009IRC-FB\AE\recon4train"
     # recon_img_dir = r"D:\dataset\optotech\009IRC-FB\AE\recon4train_L4"
+    recon_img_dir = None#r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\recon_img"
     model_shape = [None, 192, 192, 3]#[None, 512, 832, 3]
 
 
     #----SEG args
     train_img_seg_dir = [
+        r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\Seg\train"
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\train",
-        r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
-        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
-        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2",
+        # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2",
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\selected"
     ]
     test_img_seg_dir = [
+        r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\Seg\test"
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\test",
-        r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test',
+        # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test',
     ]
     predict_img_dir = [
         # r'D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\predict_img',
-        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\selected",
+        #r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\selected",
     ]
 
-    id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
+    # id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
+    id2class_name = r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\Seg\classnames.txt"
     #r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\classnames.txt"
 
 
@@ -214,11 +221,12 @@ if __name__ == "__main__":
     preprocess_dict = {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
     # {'ct_ratio': 1.48497, 'bias': 0.25, 'br_ratio': 0.25098}
     # #default {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
-    epochs = 50
+    epochs = 120
     GPU_ratio = None
-    save_dir = r"D:\code\model_saver\AE_Seg_MitTest"
-    to_fix_ae = False
-    to_fix_seg = True
+    save_dir = r"D:\code\model_saver\AE_Seg_141"
+    to_fix_ae = True
+    to_fix_seg = False
+    encript_flag = False
 
 
     ae_var = get_AE_arg(train_img_dir=train_img_dir, test_img_dir=test_img_dir, recon_img_dir=recon_img_dir,
@@ -228,7 +236,8 @@ if __name__ == "__main__":
                           predict_img_dir=predict_img_dir, id2class_name=id2class_name)
 
     para_dict = get_commom_arg(preprocess_dict=preprocess_dict, epochs=epochs, GPU_ratio=GPU_ratio, save_dir=save_dir,
-                               to_fix_ae=to_fix_ae, to_fix_seg=to_fix_seg, ae_var=ae_var, seg_var=seg_var)
+                               to_fix_ae=to_fix_ae, to_fix_seg=to_fix_seg, ae_var=ae_var, seg_var=seg_var,
+                               encript_flag=encript_flag)
 
 
     AE_Seg_train = AE_Seg(para_dict)

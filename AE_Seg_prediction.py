@@ -708,6 +708,8 @@ def recon_seg_prediction_v2(img_dir,pb_path,node_dict,img_save_dict,threshold_di
     to_save_false_detected = img_save_dict.get('to_save_false_detected')
     img_compare_with_label = img_save_dict.get('img_compare_with_label')
     img_compare_with_ori = img_save_dict.get('img_compare_with_ori')
+    to_show_predict_label = img_save_dict.get('to_show_predict_label')
+
     acc_threshold = threshold_dict.get('acc_threshold')
     prob_threshold = threshold_dict.get('prob_threshold')
     cc_th = threshold_dict.get('cc_th')
@@ -837,26 +839,59 @@ def recon_seg_prediction_v2(img_dir,pb_path,node_dict,img_save_dict,threshold_di
 
             predict_softmax = tf_tl.sess.run(tf_softmax,feed_dict=feed_dict)
 
-            #----method 1(prob_threshold)
+            #----prob_threshold process
             if prob_threshold is not None and prob_threshold <= 1:
                 max_probs_batch = np.max(predict_softmax,axis=-1)
                 coors_prob = np.where(max_probs_batch < prob_threshold)
                 predict_label[coors_prob] = 0
                 # print("{} pixels are set 0".format(len(coors_prob[0])))
 
-            # predict_label = np.argmax(predict_label, axis=-1).astype(np.uint8)
+            #----cc threshold process
+            if isinstance(cc_th,int):
+                for i in range(len(predict_label)):
+                    cc_nums, cc_map, stats, centroids = cv2.connectedComponentsWithStats(predict_label[i],
+                                                                                         connectivity=8)
+                    for cc_num in range(1, cc_nums):
+                        if stats[cc_num][-1] < cc_th:
+                            coors = np.where(cc_map == cc_num)
+                            predict_label[i][coors] = 0
+
+            #----show images
+            if to_show_predict_label:
+                for j in range(len(predict_label)):
+                    intersection = (predict_label[j] == batch_label[j]).astype(np.uint8) * 255
+                    intersection = cv2.bitwise_and(batch_label[j],batch_label[j],mask=intersection)
+                    show_data = [predict_label[j], batch_label[j],intersection]
+                    show_names = ['prediction','label',"intersection"]
+                    qty = len(show_data)
+                    for i in range(qty):
+                        zeros = np.zeros(model_shape[1:],dtype=np.uint8)
+                        uni_nums = np.unique(show_data[i])
+                        for uni_num in uni_nums:
+                            if uni_num > 0:
+                                coors = np.where(show_data[i] == uni_num)
+                                zeros[coors] = id2color[uni_num]
+
+                        plt.subplot(1,qty,i+1)
+                        plt.imshow(zeros,cmap='gray')
+                        plt.title(show_names[i])
+                    plt.show()
+
 
             if compare_with_answers:
                 #----calculate the intersection and onion
                 seg_p.cal_intersection_union(predict_label, batch_label)
 
                 #----calculate defects from label aspect by accuracy
-                t_list = seg_p.cal_label_defect_by_acc(predict_label, batch_label, paths=batch_paths, id2color=id2color)
+                # t_list = seg_p.cal_label_defect_by_acc(predict_label, batch_label, paths=batch_paths, id2color=id2color)
+                t_list = seg_p.cal_label_defect_by_acc_v2(predict_label, batch_label, paths=batch_paths, id2color=id2color)
+                # t_list = seg_p.cal_label_defect_by_acc_vTest2(predict_label, batch_label, paths=batch_paths, id2color=id2color)
                 if len(t_list):
                     undetected_list.extend(t_list)
 
                 #----calculate defects from prediction aspect by accuracy
-                t_list = seg_p.cal_predict_defect_by_acc(predict_label, batch_label, paths=batch_paths, id2color=id2color)
+                # t_list = seg_p.cal_predict_defect_by_acc(predict_label, batch_label, paths=batch_paths, id2color=id2color)
+                t_list = seg_p.cal_predict_defect_by_acc_v2(predict_label, batch_label, paths=batch_paths, id2color=id2color)
                 if len(t_list):
                     falseDetected_list.extend(t_list)
 
@@ -876,22 +911,26 @@ def recon_seg_prediction_v2(img_dir,pb_path,node_dict,img_save_dict,threshold_di
                 if map_sum > 0:
                     cc_nums, cc_map, stats, centroids = cv2.connectedComponentsWithStats(predict_label[i], connectivity=8)
                     for cc_num in range(1, cc_nums):
-                        s = stats[cc_num]
+                        # s = stats[cc_num]
                         coors = np.where(cc_map == cc_num)
                         predict_class = predict_label[i][coors][0]
                         predict_name = id2class_name[predict_class]
+                        zeros[coors] = tf_tl.id2color[predict_class]
                         text_list = re.findall('ng', predict_name, re.I)
-                        if cc_th is None:
-                            zeros[coors] = tf_tl.id2color[predict_class]
-                            if len(text_list):
-                                if ng_flag is False:
-                                    ng_flag = True
-                        else:
-                            if s[-1] >= cc_th:
-                                zeros[coors] = tf_tl.id2color[predict_class]
-                                if len(text_list):
-                                    if ng_flag is False:
-                                        ng_flag = True
+                        if len(text_list):
+                            if ng_flag is False:
+                                ng_flag = True
+                        # if cc_th is None:
+                        #     zeros[coors] = tf_tl.id2color[predict_class]
+                        #     if len(text_list):
+                        #         if ng_flag is False:
+                        #             ng_flag = True
+                        # else:
+                        #     if s[-1] >= cc_th:
+                        #         zeros[coors] = tf_tl.id2color[predict_class]
+                        #         if len(text_list):
+                        #             if ng_flag is False:
+                        #                 ng_flag = True
             #----use unique numbers to handle
             # for label_num in np.unique(predict_label[i]):
             #     if label_num != 0:
@@ -996,9 +1035,9 @@ def recon_seg_prediction_v2(img_dir,pb_path,node_dict,img_save_dict,threshold_di
             print("iou:", iou)
             print("acc:", acc)
             print("all_acc:", all_acc)
-            print("label defect stat:", seg_p.label_defect_stat)
+            print("label defect stat:\n", seg_p.label_defect_stat)
             print("defect recall:", defect_recall)
-            print("prediction defect stat:", seg_p.predict_defect_stat)
+            print("prediction defect stat:\n", seg_p.predict_defect_stat)
             print("defect sensitivity:", seg_p.defect_sensitivity)
 
         print("ok count:{}, ng count:{}".format(ok_count,ng_count))
@@ -1155,15 +1194,31 @@ if __name__ == "__main__":
     # img_dir = r'D:\dataset\optotech\silicon_division\PDAP\藥水殘(原圖+color圖+json檔)\L2_potion\train'
     # img_dir = r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\selected'
     img_dir = [
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\selected"
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\All_and_no_selected"
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\TLearning_20220715"
         # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2",
         # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test',
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\All_defects\髒污(屬OK)"
         # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\only_L2\L2_OK_無分類"
-        r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\L2_NG_all"
+        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\L2_NG_all"
         # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\L2_OK_晶紋"
-        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\Seg\test"
+        r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\Seg\test"
+        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\測試"
+
+        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\FRR、FAR圖檔\val_0.9\FAR\L2_NG"
+        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\FRR、FAR圖檔\val_0.9\Unknown\L2_NG",
+        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\FRR、FAR圖檔\val_0.9\Unknown\L2_OK"
+        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\vali_try_20220711\L2_OK"
+        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\vali_try_20220711\L2_OK_晶紋"
+
+        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\validation\L2_OK"
+        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\validation\L2_NG"
+        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\validation\L2_OK_晶紋"
+
+
     ]
     # img_dir = [
     #     r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\PD-55092G-AP_0.0.1_dataset\Seg_data\gold_particle\test",
@@ -1176,12 +1231,18 @@ if __name__ == "__main__":
     # pb_path = r"D:\code\model_saver\AE_Seg_009IRC-FB_Jane_20220627\infer_best_epoch171.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_132\infer_best_epoch178.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_134\infer_20220706181231.pb"
-    # pb_path = r"D:\code\model_saver\AE_Seg_136\infer_best_epoch183.pb"
-    pb_path = r"D:\code\model_saver\AE_Seg_136\infer_best_epoch174.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_136\infer_best_epoch183.pb"#訓練200次
+    pb_path = r"D:\code\model_saver\AE_Seg_136\infer_best_epoch174.pb"#訓練400次
     # pb_path = r"D:\code\model_saver\AE_Seg_109\infer_best_epoch3.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_106\infer_90.76.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_33\infer_best_epoch240.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_103\infer_best_epoch218.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_137\no_ok\infer_best_epoch46.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_137\infer_20220715170549.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_139\no_ok\infer_best_epoch49.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_139\infer_20220718130302.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_140\no_ok\infer_best_epoch48.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_140\infer_20220719094845.pb"
 
     id2class_name_path = r"D:\dataset\optotech\009IRC-FB\classnames.txt"
     node_dict = {'input': 'input:0',
@@ -1204,13 +1265,16 @@ if __name__ == "__main__":
     #                      )
     # infer_speed_test(img_dir, pb_path, node_dict,batch_size=1,set_img_num=1000)
 
-    compare_with_answers = False
+    compare_with_answers = True
     img_save_dict = dict()
-    img_save_dict['to_save_predict_image'] = False
+    img_save_dict['to_save_predict_image'] = True
+    img_save_dict['img_compare_with_ori'] = False
     img_save_dict['to_save_false_detected'] = False
     img_save_dict['to_save_defect_undetected'] = False
     img_save_dict['img_compare_with_label'] = False
-    img_save_dict['img_compare_with_ori'] = False
+
+
+    img_save_dict['to_show_predict_label'] = False
 
     threshold_dict = dict()
     threshold_dict['prob_threshold'] = None

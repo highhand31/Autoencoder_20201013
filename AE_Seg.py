@@ -1544,7 +1544,8 @@ class AE_Seg():
                                 #----calculate the loss and accuracy
                                 train_loss_seg += loss_temp
                                 seg_p.cal_intersection_union(predict_label,batch_label)
-                                _ = seg_p.cal_label_defect_by_acc(predict_label, batch_label)
+                                _ = seg_p.cal_label_defect_by_acc_v2(predict_label, batch_label)
+                                _ = seg_p.cal_predict_defect_by_acc_v2(predict_label, batch_label)
 
                             train_loss_seg /= train_ites_seg
                             seg_train_result_dict['loss'] = train_loss_seg
@@ -1553,6 +1554,7 @@ class AE_Seg():
                             self.content["seg_train_loss_list"] = seg_train_loss_list
                             train_iou_seg, train_acc_seg, train_all_acc_seg = seg_p.cal_iou_acc(save_dict=self.content,name='train')
                             train_defect_recall = seg_p.cal_defect_recall(save_dict=self.content,name='train')
+                            train_defect_sensitivity = seg_p.cal_defect_sensitivity(save_dict=self.content,name='train')
                             #print("iou:{}, acc:{}, all_acc:{}".format(iou, acc, all_acc))
                             #print("train_loss_seg:",train_loss_seg)
 
@@ -1594,7 +1596,8 @@ class AE_Seg():
                                     test_loss_seg += loss_temp
 
                                     seg_p.cal_intersection_union(predict_label, batch_label)
-                                    _ = seg_p.cal_label_defect_by_acc(predict_label,batch_label)
+                                    _ = seg_p.cal_label_defect_by_acc_v2(predict_label,batch_label)
+                                    _ = seg_p.cal_predict_defect_by_acc_v2(predict_label,batch_label)
 
                                 test_loss_seg /= test_ites_seg
                                 seg_test_result_dict['loss'] = test_loss_seg
@@ -1604,6 +1607,7 @@ class AE_Seg():
                                 test_iou_seg, test_acc_seg, test_all_acc_seg = seg_p.cal_iou_acc(save_dict=self.content,
                                                                                                     name='test')
                                 test_defect_recall = seg_p.cal_defect_recall(save_dict=self.content, name='test')
+                                test_defect_sensitivity = seg_p.cal_defect_sensitivity(save_dict=self.content, name='test')
 
                                 #----find the best performance(SEG)
                                 if seg_var.get('target_of_best') == 'defect_recall':
@@ -1641,11 +1645,13 @@ class AE_Seg():
 
                             self.display_results(self.id2class_name,print_out,'訓練集',
                                                  iou=train_iou_seg,acc=train_acc_seg,
-                                                 defect_recall=train_defect_recall,all_acc=train_all_acc_seg
+                                                 defect_recall=train_defect_recall,all_acc=train_all_acc_seg,
+                                                 defect_sensitivity=train_defect_sensitivity
                                                  )
                             self.display_results(self.id2class_name, print_out, '驗證集',
                                                  iou=test_iou_seg, acc=test_acc_seg,
-                                                 defect_recall=test_defect_recall, all_acc=test_all_acc_seg
+                                                 defect_recall=test_defect_recall, all_acc=test_all_acc_seg,
+                                                 defect_sensitivity=test_defect_sensitivity
                                                  )
                             # self.display_iou_acc(train_iou_seg, train_acc_seg,train_defect_recall, train_all_acc_seg,
                             #                      self.id2class_name,name='訓練集',print_out=print_out)
