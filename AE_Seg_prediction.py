@@ -1207,6 +1207,14 @@ if __name__ == "__main__":
         # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\L2_OK_晶紋"
         r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\Seg\test"
         # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\測試"
+        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_NG_AL_lost",
+        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_NG_crack",
+        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_NG_emit_scratch",
+        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_NG_pad_pothole",
+        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_NG_pad_residual_glue",
+        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_NG_pad_scratch",
+        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_NG_pollution",
+        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_OK_line_pattern",
 
         # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\FRR、FAR圖檔\val_0.9\FAR\L2_NG"
         # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\FRR、FAR圖檔\val_0.9\Unknown\L2_NG",
@@ -1232,7 +1240,7 @@ if __name__ == "__main__":
     # pb_path = r"D:\code\model_saver\AE_Seg_132\infer_best_epoch178.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_134\infer_20220706181231.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_136\infer_best_epoch183.pb"#訓練200次
-    pb_path = r"D:\code\model_saver\AE_Seg_136\infer_best_epoch174.pb"#訓練400次
+    # pb_path = r"D:\code\model_saver\AE_Seg_136\infer_best_epoch174.pb"#訓練400次
     # pb_path = r"D:\code\model_saver\AE_Seg_109\infer_best_epoch3.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_106\infer_90.76.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_33\infer_best_epoch240.pb"
@@ -1243,6 +1251,8 @@ if __name__ == "__main__":
     # pb_path = r"D:\code\model_saver\AE_Seg_139\infer_20220718130302.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_140\no_ok\infer_best_epoch48.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_140\infer_20220719094845.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_141\infer_best_epoch7.pb"
+    pb_path = r"D:\code\model_saver\AE_Seg_142\infer_best_epoch298.pb"
 
     id2class_name_path = r"D:\dataset\optotech\009IRC-FB\classnames.txt"
     node_dict = {'input': 'input:0',
@@ -1266,20 +1276,20 @@ if __name__ == "__main__":
     # infer_speed_test(img_dir, pb_path, node_dict,batch_size=1,set_img_num=1000)
 
     compare_with_answers = True
-    img_save_dict = dict()
-    img_save_dict['to_save_predict_image'] = True
-    img_save_dict['img_compare_with_ori'] = False
-    img_save_dict['to_save_false_detected'] = False
-    img_save_dict['to_save_defect_undetected'] = False
-    img_save_dict['img_compare_with_label'] = False
+    img_save_dict = {
+        'to_save_predict_image': False,
+        'img_compare_with_ori': False,
+        'to_save_false_detected': False,
+        'to_save_defect_undetected': False,
+        'img_compare_with_label': False,
+        'to_show_predict_label': False,
+    }
 
-
-    img_save_dict['to_show_predict_label'] = False
-
-    threshold_dict = dict()
-    threshold_dict['prob_threshold'] = None
-    threshold_dict['cc_th'] = None
-    threshold_dict['acc_threshold'] = 0.3
+    threshold_dict = {
+        'prob_threshold': None,
+        'cc_th': None,
+        'acc_threshold': 0.3,
+    }
 
     recon_seg_prediction_v2(img_dir, pb_path, node_dict, img_save_dict, threshold_dict,
                             compare_with_answers=compare_with_answers,

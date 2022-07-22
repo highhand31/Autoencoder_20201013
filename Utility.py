@@ -1264,7 +1264,7 @@ class tools():
                         h, w = img.shape[:2]#要重新讀一次shape是因為若有經過shift，尺寸會改變
                         M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
                         img = cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
-                        # lbl = cv2.warpAffine(lbl, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+                        lbl = cv2.warpAffine(lbl, M, (w, h), borderMode=cv2.BORDER_REPLICATE,flags=cv2.INTER_NEAREST)
                     # if self.p_dict.get('rdm_patch'):
                     #     #----put no patch image
                     #     # img_no_patch = img.copy()
@@ -1324,12 +1324,12 @@ class tools():
 
                 #----resize and change the color format
                 img = cv2.resize(img, (output_shape[1], output_shape[0]))
-
+                lbl = cv2.resize(lbl, (output_shape[1], output_shape[0]), interpolation=cv2.INTER_NEAREST)
                 #----show the lbl image(before and after resize)
                 # img_lbl = np.where(lbl > 0,255,0).astype(np.uint8)
+                # lbl = self.resize_label(lbl,(output_shape[1], output_shape[0]), to_process=to_process,
+                #                         rdm_angle=self.p_dict.get('rdm_angle'),M=M)
 
-                lbl = self.resize_label(lbl,(output_shape[1], output_shape[0]), to_process=to_process,
-                                        rdm_angle=self.p_dict.get('rdm_angle'),M=M)
 
 
                 # img_lbl_r = np.where(lbl > 0,255,0).astype(np.uint8)
@@ -1951,6 +1951,44 @@ class tf_utility(tools):
             #save_img = cv2.drawContours(save_img,contours,-1,(0,0,255),1)
 
         return save_img
+
+class DataLoader():
+    def __init__(self,paths,batch_size=32,shuffle=True,labels=None):
+        qty = len(paths)
+        ites = math.ceil(qty / batch_size)
+        if isinstance(paths,np.ndarray) is False:
+            paths = np.array(paths)
+        if labels is not None:
+            if isinstance(labels, np.ndarray) is False:
+                labels = np.array(labels)
+        self.qty = qty
+        self.batch_size = batch_size
+        self.paths = paths
+        self.labels = labels
+        self.iterations = ites
+        self.ite_num = 0
+
+        if shuffle:
+            self.shuffle()
+    def shuffle(self):
+        indices = np.random.permutation(self.qty)
+        self.paths = self.paths[indices]
+        if self.labels is not None:
+            self.labels = self.labels[indices]
+    def __next__(self):
+        num_start = self.batch_size * self.ite_num
+        num_end = np.minimum(num_start + self.batch_size, self.qty)
+        self.ite_num += 1
+
+        if self.labels is not None:
+            return self.paths[num_start:num_end], self.labels[num_start:num_end]
+        else:
+            return self.paths[num_start:num_end]
+
+
+
+
+
 
 def makedirs(make_dir_list):
     msg_list = list()
@@ -3483,6 +3521,70 @@ def dict_transform(ori_dict,set_key=False,set_value=False):
 
     return new_dict
 
+def label_uniqueNum_check(json_dir,cls_name_path,resize,angle=None):
+
+    class_names, class_name2id, id2class_name, id2color = get_classname_id_color(cls_name_path, print_out=True,
+                                                                                 save_dir=None)
+
+    count = 0
+    tl = tools(print_out=True)
+    paths = [file.path for file in os.scandir(json_dir) if file.name.split(".")[-1] == 'json']
+    qty = len(paths)
+
+    if len(paths) == 0:
+        print("No json files")
+    else:
+        for path in paths:
+            with open(path, 'r', encoding='utf8') as f:
+                content = json.load(f)
+                h = content['imageHeight']
+                w = content['imageWidth']
+
+            label_shapes = tl.get_label_shapes(path)
+            if label_shapes is None:
+                continue
+            try:
+                lbl = tl.shapes_to_label(
+                    img_shape=[h, w, 3],
+                    shapes=label_shapes,
+                    label_name_to_value=class_name2id,
+                )
+                num_list_1 = list(np.unique(lbl))
+                # ----rotate
+                if angle is not None:
+                    M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
+                    lbl = cv2.warpAffine(lbl, M, (w, h), borderMode=cv2.BORDER_REPLICATE,borderValue=None,flags=cv2.INTER_NEAREST)
+
+                    '''cv2.BORDER_WRAP
+                    cv2.BORDER_DEFAULT
+                    BORDER_REFLECT
+                    BORDER_CONSTANT
+                    BORDER_ISOLATED
+                    BORDER_TRANSPARENT
+                    '''
+
+                lbl_r = cv2.resize(lbl, resize, interpolation=cv2.INTER_NEAREST)
+
+                num_list_2 = list(np.unique(lbl_r))
+
+                if num_list_1 == num_list_2:
+                    count += 1
+                elif len(num_list_2) < len(num_list_1):  # 有可能因為resize後過小，導致一些pixel數值消失
+                    wrong_flag = False
+                    for num in num_list_2:
+                        if num not in num_list_1:
+                            wrong_flag = True
+                            break
+                    if wrong_flag is False:
+                        count += 1
+                else:
+                    print("before unique numbers:", num_list_1)
+                    print("after unique numbers:", num_list_2)
+            except:
+                print("label Error:", path)
+
+    print("unique numbers identical ratio:", count / qty)
+
 class NormDense(tf.keras.layers.Layer):
 
     def __init__(self, feature_num, classes=1000, output_name=''):
@@ -3504,6 +3606,19 @@ class NormDense(tf.keras.layers.Layer):
         return x
 
 if __name__ == "__main__":
+    #----dataloader
+    img_dir = r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_OK_line_pattern"
+    tl = tools(print_out=True)
+    count = 0
+    paths,qty = tl.get_paths(img_dir)
+    d_loader = DataLoader(paths,batch_size=7,shuffle=True)
+    for i in range(d_loader.iterations):
+        batch_paths = d_loader.__next__()
+        for path in batch_paths:
+            print(path)
+            count += 1
+    print(i)
+    print(count)
     #----contrast_and_brightness_compare
     # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\ori\L1_particle"
     # paths = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] == 'jpg']
@@ -3560,7 +3675,7 @@ if __name__ == "__main__":
     # img_mask(img_source, json_path,zoom_in_value=[75,77,88,88], img_type='path')
 
     #----check results
-    # dir_path = r"D:\code\model_saver\AE_Seg_141"
+    # dir_path = r"D:\code\model_saver\AE_Seg_137"
     # dir_path = r"C:\Users\User\Desktop\train_result"
     # dir_path = r"D:\code\model_saver\Opto_tech\CLS_PDAP_defect_20220112"
     # only2see = ['seg_test_defect_sensitivity_list']
@@ -3608,60 +3723,14 @@ if __name__ == "__main__":
     #         shutil.copy(path, new_path)
 
     #----check label
-    # json_dir = r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\Seg\test"
-    json_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test"
-    # root_dir = r"D:\dataset\optotech\009IRC-FB\classnames.txt"
-    root_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
-    resize = (512,512)
-    class_names,class_name2id,id2class_name,id2color = get_classname_id_color(root_dir,print_out=True,save_dir=None)
+    # json_dir = r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\Seg\train"
+    # cls_name_path = r"D:\dataset\optotech\009IRC-FB\classnames.txt"
+    # json_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train"
+    # cls_name_path = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
+    # resize = (192, 192)
+    # angle = 60
+    # label_uniqueNum_check(json_dir,cls_name_path,resize,angle=angle)
 
-    count = 0
-    tl = tools(print_out=True)
-    paths = [file.path for file in os.scandir(json_dir) if file.name.split(".")[-1] == 'json']
-    qty = len(paths)
-
-    if len(paths) == 0:
-        print("No json files")
-    else:
-        for path in paths :
-            with open(path,'r',encoding='utf8') as f:
-                content = json.load(f)
-                h = content['imageHeight']
-                w = content['imageWidth']
-
-            label_shapes = tl.get_label_shapes(path)
-            if label_shapes is None:
-                continue
-            try:
-                lbl = tl.shapes_to_label(
-                    img_shape=[h,w,3],
-                    shapes=label_shapes,
-                    label_name_to_value=class_name2id,
-                )
-                num_list_1 = list(np.unique(lbl))
-
-                lbl_r = cv2.resize(lbl,resize,interpolation=cv2.INTER_NEAREST)
-
-                num_list_2 = list(np.unique(lbl_r))
-
-                if num_list_1 == num_list_2:
-                    count += 1
-                elif len(num_list_2) < len(num_list_1):#有可能因為resize後過小，導致一些pixel數值消失
-                    wrong_flag = False
-                    for num in num_list_2:
-                        if num not in num_list_1:
-                            wrong_flag = True
-                            break
-                    if wrong_flag is False:
-                        count += 1
-                else:
-                    print("before unique numbers:",num_list_1)
-                    print("after unique numbers:",num_list_2)
-            except:
-                print("label Error:", path)
-
-
-    print("unique numbers identical ratio:",count / qty)
 
 
 

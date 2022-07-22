@@ -76,38 +76,26 @@ def get_SEG_arg(**kwargs):
     #                                ]
     # seg_var['predict_img_dir'] = [r'D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\predict_img']
     seg_var['to_train_w_AE_paths'] = False
-    seg_var['infer_method'] = "Seg_pooling_net_V4"#'Seg_pooling_net_V4'#'mit_b0'#'Seg_pooling_net_V4'#'Seg_DifNet'
+    seg_var['infer_method'] = "Seg_pooling_net_V8"#'Seg_pooling_net_V4'#'mit_b0'#'Seg_pooling_net_V4'#'Seg_DifNet'
     seg_var['encode_dict'] = {
         "first_layer": {
-            "type": "dilated_downSampling",
-            "kernel": 5,
-            "filter": 8,
-            "ratio": [1, 2, 5]
+            # "type": "dilated_downSampling",
+            # "kernel": 5,
+            # "filter": 8,
+            # "ratio": [1, 2, 5]
         },
-        'kernel_list': [3]*3,#[5, 5, 5, 5],
-        'filter_list': [32, 48, 64],#[48, 64, 80, 96],
-        'stride_list': [2]*3,#[2, 2, 2, 2],
+        'kernel_list': [5]*5,
+        'filter_list': [32, 48, 64, 80, 96],
+        'stride_list': [2]*5,
         'pool_type_list': ['max'],
-        'pool_kernel_list': [5]*3,#[5, 5, 5, 5],
+        'pool_kernel_list': [5]*5,#[5, 5, 5, 5],
         'multi_ratio': 2,
-        # 'kernel_list': [7, 5, 5, 5, 3, 3, 3],
-        # 'filter_list': [16, 24, 32, 40, 48, 56, 64],
-        # 'stride_list': [2, 2, 2, 2, 2, 2, 2],
-        # 'pool_type_list': ['cnn', 'max'],
-        # 'pool_kernel_list': [7, 5, 5, 5, 3, 3, 3],
-        # 'layer_list': [3],
     }
     seg_var['decode_dict'] = {
-        # 'pool_type_list': ['cnn','max'],
-        # 'cnn_type':'resnet',
-        # 'kernel_list': [3, 3, 3, 5, 5, 5, 7],
-        # 'filter_list': [64, 56, 48, 40, 32, 24, 16],
-        # 'stride_list': [2, 2, 2, 2, 2, 2, 2],
-        # 'pool_type_list': ['max'],
         'cnn_type':'',
-        'kernel_list': [3]*3,#[5, 5, 5, 5],
-        'filter_list': [64, 48, 32],#[96, 80, 64, 48],
-        'stride_list': [2]*3,#[2, 2, 2, 2],
+        'kernel_list': [5]*5,
+        'filter_list': [96, 80, 64, 48, 32],
+        'stride_list': [2]*5,#[2, 2, 2, 2],
         'multi_ratio': 2,
     }
     # seg_var['rot'] = True
@@ -121,7 +109,7 @@ def get_SEG_arg(**kwargs):
     # ====train
     seg_var['ratio'] = 1.0
     seg_var['batch_size'] = 1
-    seg_var['setting_dict'] = {'rdm_shift': 0.1, 'rdm_angle': 10}
+    seg_var['setting_dict'] = {'rdm_shift': 0.05, 'rdm_angle': 5}
 
     seg_var['process_dict'] = {"rdm_flip": True,
                                'rdm_br': True,
@@ -221,9 +209,9 @@ if __name__ == "__main__":
     preprocess_dict = {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
     # {'ct_ratio': 1.48497, 'bias': 0.25, 'br_ratio': 0.25098}
     # #default {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
-    epochs = 120
+    epochs = 1
     GPU_ratio = None
-    save_dir = r"D:\code\model_saver\AE_Seg_141"
+    save_dir = r"D:\code\model_saver\AE_Seg_142"
     to_fix_ae = True
     to_fix_seg = False
     encript_flag = False
