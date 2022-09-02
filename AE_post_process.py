@@ -393,7 +393,7 @@ def recon_pixel_comparison(img_dir, pb_path, diff_th, cc_th,**kwargs):
 
     #----time calculation
     d_t = time.time() - d_t
-    ave_time = d_t / len(paths)
+    ave_time = d_t / (len(paths)+1e-9)
     print("image qty:{}, average process time:{}".format(len(paths),ave_time))
 
     #----save record
@@ -1314,11 +1314,16 @@ if __name__ == "__main__":
 
     # img_source = r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\only_L2"
     # img_source = r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\validation\L2_OK_晶紋"
-    img_source = r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\validation"#要注意是否有去除晶紋
+    # img_source = r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\validation"#要注意是否有去除晶紋
 
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E06\recon_img"
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\result organization\AE_Seg_103_20220519\AE_find_defects\Particle"
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\ok_parts_train"
+
+    # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_矽電Label_Tidy_data\NG\origin"
+    img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220829_AOI_NG\real_ans\low_contrast"
+    # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_矽電Label_Tidy_data\NG\origin\br0_ct38.25"
+    # img_source = r"C:\Users\User\Downloads\20220818_矽電Label_Tidy_data\NG\origin\br16_ct96"
 
     # pb_path = r"D:\code\model_saver\Opto_tech\AE_PDAP_top_20220208_3\infer_99.65.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_102\pb_model.pb"
@@ -1339,23 +1344,28 @@ if __name__ == "__main__":
     # pb_path = r"D:\code\model_saver\AE_Seg_125\infer_91.79.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_126\infer_95.19.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_127\infer_96.51.nst"
-    pb_path = r"D:\code\model_saver\AE_Seg_130\infer_93.29.nst"
+    # pb_path = r"D:\code\model_saver\AE_Seg_130\infer_93.29.nst"
+    # pb_path = r"D:\code\model_saver\PDAP_55077_正光_formal_20220601\infer_best_epoch7.nst"
+    # pb_path = r"D:\code\model_saver\AE_Seg_143\infer_20220823175227.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_144\infer_20220824104747.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch57.pb"
+    pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch61.nst"
 
     pb_path_list = [
         # r"D:\code\model_saver\AE_Seg_113\infer_91.87.nst"
         r"D:\code\model_saver\AE_Seg_114\infer_94.09.nst",
-        r"D:\code\model_saver\AE_Seg_123\infer_94.59.nst"
+        r"D:\code\model_saver\AE_Seg_123\infer_94.59.nst",
     ]
     # save_dir = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E04\02\results_544x832"
     save_dir = img_source
 
-    diff_th = 30
-    cc_th = 60
+    diff_th = 10
+    cc_th = 10
 
-    img_ori2process = True
+    img_ori2process = False
     img_ori_p_args = ['gau_blur',(3,3)]  # [process_type,kernel]
 
-    recon2erode = True  # 這個是recon與原圖相減後的erode處理
+    recon2erode = False  # 這個是recon與原圖相減後的erode處理
     erode_args = [(3, 3), 2]  # [kernel,erode times]
 
     zoom_in_value = None#[33]*4#[45]*4#[75,77,88,88]#5 #[75,77,88,88]
@@ -1374,21 +1384,22 @@ if __name__ == "__main__":
     process_dict = {'ave_filter': False, 'gau_filter': False}
     setting_dict = {'ave_filter': (3, 3), 'gau_filter': (3, 3)}
 
-    save_type = [False,# pred_ok_ans_ok_count
-                 True,#pred_ok_ans_ng_count
-                 True,#pred_ng_ans_ok_count
-                 True #pred_ng_ans_ng_count
+    save_type = [
+                 False,# pred_ok_ans_ok_count
+                 False,#pred_ok_ans_ng_count
+                 False,#pred_ng_ans_ok_count
+                 False #pred_ng_ans_ng_count
                  ]
 
-    output_dir = recon_pixel_comparison(img_source, pb_path, diff_th, cc_th, batch_size=batch_size,
-                           zoom_in_value=zoom_in_value,
-                           recon2erode=recon2erode, erode_args=erode_args,
-                           img_ori2process=img_ori2process,img_ori_p_args=img_ori_p_args,
-                           mask_json_path = mask_json_path,
-                           to_mask=to_mask,
-                           node_dict=node_dict,
-                           process_dict=process_dict, setting_dict=setting_dict,
-                           save_type=save_type, save_dir=save_dir)
+    # output_dir = recon_pixel_comparison(img_source, pb_path, diff_th, cc_th, batch_size=batch_size,
+    #                        zoom_in_value=zoom_in_value,
+    #                        recon2erode=recon2erode, erode_args=erode_args,
+    #                        img_ori2process=img_ori2process,img_ori_p_args=img_ori_p_args,
+    #                        mask_json_path = mask_json_path,
+    #                        to_mask=to_mask,
+    #                        node_dict=node_dict,
+    #                        process_dict=process_dict, setting_dict=setting_dict,
+    #                        save_type=save_type, save_dir=save_dir)
 
     # output_dir = recon_pixel_comparison_v2(img_source, pb_path_list, diff_th, cc_th, batch_size=batch_size,
     #                        zoom_in_value=zoom_in_value,
@@ -1406,8 +1417,8 @@ if __name__ == "__main__":
     read_subdir:預設值是False，僅讀取資料夾內的圖片，若True，則會讀取'次'資料夾的圖片
     '''
     save_recon = True
-    cc_type = 'rec'
-    defect_save_type = 'single'#compare, single 沒有填就不會儲存預測圖
+    cc_type = ''
+    defect_save_type = 'single'#compare, single，若沒有填就不會儲存預測圖
     if True in save_type:
         read_subdir = True
         # save_dir = r"D:\dataset\optotech\009IRC-FB\AE\AE_results_192x192"
@@ -1430,8 +1441,8 @@ if __name__ == "__main__":
 
 
     #----AE_find_defects v2
-    # output_dir = r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_results_192x192_AE_Seg_114AndAE_Seg_123"
-    # AE_find_defects_v2(output_dir, pb_path_list, diff_th, cc_th, batch_size=batch_size, zoom_in_value=zoom_in_value,
+    # output_dir = r"C:\Users\User\Downloads\20220818_矽電Label_Tidy_data\NG\origin"
+    # AE_find_defects_v2(output_dir, pb_path, diff_th, cc_th, batch_size=batch_size, zoom_in_value=zoom_in_value,
     #                 to_mask=to_mask,
     #                 node_dict=node_dict, process_dict=process_dict, setting_dict=setting_dict, cc_type="",
     #                 save_type='', save_recon=False, read_subdir=True, mask_json_path=mask_json_path)

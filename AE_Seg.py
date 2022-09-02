@@ -304,7 +304,7 @@ class AE_Seg():
                         else:
                             source = os.path.dirname(train_img_seg_dir[0])
 
-                        class_names, class_name2id, id2class_name, id2color = get_classname_id_color(source, print_out=print_out)
+                        class_names, class_name2id, id2class_name, id2color,_ = get_classname_id_color(source, print_out=print_out)
 
                         class_num = len(class_names)
                         if class_num == 0:
@@ -1610,10 +1610,17 @@ class AE_Seg():
                                 test_defect_sensitivity = seg_p.cal_defect_sensitivity(save_dict=self.content, name='test')
 
                                 #----find the best performance(SEG)
-                                if seg_var.get('target_of_best') == 'defect_recall':
+                                target_of_best = seg_var.get('target_of_best')
+                                print("target_of_best:",target_of_best)
+                                if target_of_best == 'defect_recall':
                                     new_value = seg_p.sum_defect_recall()
+                                elif target_of_best == 'defect_sensitivity':
+                                    new_value = seg_p.sum_defect_sensitivity()
+                                elif target_of_best == 'recall+sensitivity':
+                                    new_value = seg_p.sum_defect_recall() + seg_p.sum_defect_sensitivity()
                                 else:
                                     new_value = seg_p.sum_iou_acc()
+
                                 if epoch == 0:
                                     LV['record_value_seg'] = new_value
                                 else:

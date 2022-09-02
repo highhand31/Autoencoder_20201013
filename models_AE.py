@@ -1207,10 +1207,9 @@ def Seg_pooling_net_V8(tf_input,tf_input_2,encode_dict,decode_dict,out_channel=3
     kernel_list = encode_dict['kernel_list']
     pool_kernel_list = encode_dict['pool_kernel_list']
     stride_list = encode_dict['stride_list']
-    activation = encode_dict.get('activation')
+    activation = get_activation(encode_dict.get('activation'))
     multi_ratio = encode_dict.get('multi_ratio')
-    if activation is None:
-        activation = tf.nn.relu
+
 
     if multi_ratio is not None:
         filter_list = np.array(filter_list) * multi_ratio
@@ -1234,6 +1233,9 @@ def Seg_pooling_net_V8(tf_input,tf_input_2,encode_dict,decode_dict,out_channel=3
             if pool_type == 'max':
                 net_temp = v2.keras.layers.MaxPool2D(pool_size=pool_kernel,strides=strides,padding='same')(net)
                 pool_list.append(net_temp)
+            elif pool_type == 'ave':
+                net_temp = v2.keras.layers.AveragePooling2D(pool_size=pool_kernel,strides=strides,padding='same')(net)
+                pool_list.append(net_temp)
             elif pool_type == 'cnn':
                 net_temp = v2.keras.layers.Conv2D(filters,kernel,strides=strides,padding='same')(net)
                 pool_list.append(net_temp)
@@ -1255,10 +1257,9 @@ def Seg_pooling_net_V8(tf_input,tf_input_2,encode_dict,decode_dict,out_channel=3
     filter_list = decode_dict['filter_list']
     kernel_list = decode_dict['kernel_list']
     stride_list = decode_dict['stride_list']
-    activation = decode_dict.get('activation')
+    activation = get_activation(decode_dict.get('activation'))
     multi_ratio = decode_dict.get('multi_ratio')
-    if activation is None:
-        activation = tf.nn.relu
+
 
     if multi_ratio is not None:
         filter_list = np.array(filter_list) * multi_ratio
@@ -3060,4 +3061,17 @@ def rot_cnn(net,filters,kernel,stride=1,activation=tf.nn.relu,padding='same',nam
                activation=activation, stride=stride, padding=padding,name=name)
     net_rot = v2.image.rot90(net_rot, k=-1)
     return net_rot
+
+def get_activation(name):
+    acti_dict = dict(
+        relu=v2.nn.relu,
+        gelu=v2.nn.gelu,
+        swish=v2.nn.swish,#the best https://arxiv.org/pdf/1710.05941.pdf
+        leaky_relu=v2.nn.leaky_relu,
+        silu=v2.nn.silu
+        )
+    if acti_dict.get(name) is None:
+        return v2.nn.relu
+    else:
+        return acti_dict[name]
 
