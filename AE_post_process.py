@@ -680,6 +680,7 @@ def AE_find_defects(img_dir, pb_path, diff_th, cc_th, batch_size=32, zoom_in_val
     rec_coor_list = list()
     name_list= ['original','defect labeled']
     color = (1, 0, 0)
+    img_standard_path = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220901_AOI判定OK\OK(多區OK)\train\0_-16_MatchLightSet_NoFailRegion_Ok_1.jpg"
 
     # ----norm
     diff_th /= 255
@@ -699,6 +700,8 @@ def AE_find_defects(img_dir, pb_path, diff_th, cc_th, batch_size=32, zoom_in_val
     tf_loss = tf_dict['loss']
     height = tf_dict['input'].shape[1].value
     width = tf_dict['input'].shape[2].value
+    if 'input_standard' in tf_dict.keys():
+        tf_input_standard = tf_dict['input_standard']
     model_shape = (height, width, 3)
 
     if read_subdir is True:
@@ -754,7 +757,11 @@ def AE_find_defects(img_dir, pb_path, diff_th, cc_th, batch_size=32, zoom_in_val
                 batch_data = get_process_data(batch_paths, model_shape, process_dict=process_dict,
                                               setting_dict=setting_dict)
                 # print(batch_data.shape)
-                batch_recon = sess.run(tf_recon, feed_dict={tf_dict['input']: batch_data})
+                feed_dict = {tf_dict['input']: batch_data}
+                if 'input_standard' in tf_dict.keys():
+                    img_standard = get_process_data([img_standard_path] * batch_size, model_shape,process_dict={})
+                    feed_dict[tf_input_standard] = img_standard
+                batch_recon = sess.run(tf_recon, feed_dict=feed_dict)
                 # batch_loss = sess.run(tf_loss, feed_dict={tf_dict['input_ori']: batch_data})
                 # print("batch_loss:",batch_loss)
 
@@ -1320,8 +1327,11 @@ if __name__ == "__main__":
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\result organization\AE_Seg_103_20220519\AE_find_defects\Particle"
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\ok_parts_train"
 
-    # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_矽電Label_Tidy_data\NG\origin"
-    img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220829_AOI_NG\real_ans\low_contrast"
+    # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220829_AOI_NG\real_ans\NG"
+    # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_AOI_NG\real_ans\should_be_NG"
+    img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_矽電Label_Tidy_data\NG\origin"
+    # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220829_AOI_NG\real_ans\low_contrast"
+    # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220901_AOI判定OK\OK(多區OK)\num_100\low_contrast"
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_矽電Label_Tidy_data\NG\origin\br0_ct38.25"
     # img_source = r"C:\Users\User\Downloads\20220818_矽電Label_Tidy_data\NG\origin\br16_ct96"
 
@@ -1349,7 +1359,10 @@ if __name__ == "__main__":
     # pb_path = r"D:\code\model_saver\AE_Seg_143\infer_20220823175227.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_144\infer_20220824104747.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch57.pb"
+    # pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch61.nst"
     pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch61.nst"
+    # pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_20220905142213.nst"
+    # pb_path = r"D:\code\model_saver\AE_Seg_146\infer_99.21.nst"
 
     pb_path_list = [
         # r"D:\code\model_saver\AE_Seg_113\infer_91.87.nst"
@@ -1372,10 +1385,11 @@ if __name__ == "__main__":
     mask_json_path = None#r"D:\dataset\optotech\silicon_division\PDAP\top_view\PD-55077GR-AP AI Training_2022.01.26\AE_results_544x832_diff10cc60_more_filters\pred_ng_ans_ok\t0_12_-20_MatchLightSet_作用區_Ng_1.json"
     to_mask = False
 
-    batch_size = 8
+    batch_size = 1
 
     node_dict = {'input': 'input:0',
                  'input_ori': 'input_ori:0',
+                 'input_standard': 'input_standard:0',
                  'loss': "loss_AE:0",
                  'embeddings': 'embeddings:0',
                  'output': "output_AE:0"
@@ -1416,7 +1430,7 @@ if __name__ == "__main__":
     save_type:預設值是''，僅儲存瑕疵圖，亦可輸入compare，會儲存原圖與瑕疵圖的比較
     read_subdir:預設值是False，僅讀取資料夾內的圖片，若True，則會讀取'次'資料夾的圖片
     '''
-    save_recon = True
+    save_recon = False
     cc_type = ''
     defect_save_type = 'single'#compare, single，若沒有填就不會儲存預測圖
     if True in save_type:
@@ -1424,8 +1438,6 @@ if __name__ == "__main__":
         # save_dir = r"D:\dataset\optotech\009IRC-FB\AE\AE_results_192x192"
         # zoom_in_value = [75,77,88,88]#5 #[75,77,88,88]
         # mask_json_path = None#r"D:\dataset\optotech\silicon_division\PDAP\top_view\PD-55077GR-AP AI Training_2022.01.26\AE_results_544x832_diff10cc60_more_filters\pred_ng_ans_ok\t0_12_-20_MatchLightSet_作用區_Ng_1.json"
-
-
     else:
         output_dir = img_source
         read_subdir = False

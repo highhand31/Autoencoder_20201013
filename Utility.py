@@ -2,12 +2,14 @@ import os,math,cv2,json,imgviz,shutil,uuid,PIL,time,re
 import numpy as np
 import tensorflow
 import matplotlib.pyplot as plt
+from image_process import process_dict
 
 #----tensorflow version check
 if tensorflow.__version__.startswith('1.'):
     import tensorflow as tf
     from tensorflow.python.platform import gfile
 else:
+    import tensorflow as v2
     import tensorflow.compat.v1 as tf
     tf.disable_v2_behavior()
     import tensorflow.compat.v1.gfile as gfile
@@ -19,6 +21,7 @@ print_out = True
 TCPConnected = False
 
 img_format = {'png','PNG','jpg','JPG','JPEG','bmp','BMP'}
+
 
 class Seg_performance():
     def __init__(self,num_classes,print_out=False):
@@ -948,11 +951,12 @@ class tools():
         color_img_dir = r".\car"
         setting_dict = ori_setting_dict.copy()
         perlin_default_dict = dict(mode='nature',area_range=[30,1000],defect_num=5,pixel_range=[210,250])
+        lightDefect_default_dict = dict(area_range=[500, 1000], defect_num=3, pixel_range=[7, 12], zoom_in=0, p=0.5)
 
         default_set_dict = {
             'ave_filter':(3,3),'gau_filter':(3,3),'rdm_shift':0.1,'rdm_br':np.array([0.88,1.12]),
             'rdm_flip':[1, 0, -1, 2],'rdm_blur':[1,1,1,3,3,3,5,5],'rdm_angle':[-5,5],
-            'rdm_patch':[0.25,0.3,10],'rdm_perlin':perlin_default_dict,
+            'rdm_patch':[0.25,0.3,10],'rdm_perlin':perlin_default_dict, 'rdm_light_defect':lightDefect_default_dict,
             'rdm_br_ct':np.array([0.2,0.2])}
         '''
         rdm_patch:
@@ -1009,6 +1013,8 @@ class tools():
                     # self.rdm_perlin['paths_color'] = paths_color
                     # self.rdm_perlin['pixel_range'] = setting_dict[key][2:4]
                     # self.rdm_perlin['defect_num'] = setting_dict[key][-1]
+                if key == 'rdm_light_defect':
+                    self.rdmLightDefect = RandomLightDefect(noise_img_dir=noise_img_dir,**setting_dict[key])
 
 
         self.p_dict = process_dict
@@ -1460,6 +1466,7 @@ class tools():
         len_path = len(paths)
         to_gray = False
         key_list = ['rdm_shift','rdm_patch','rdm_br_ct','rdm_br']
+        return_ori_name = ['rdm_patch', 'rdm_perlin', 'rdm_light_defect']
 
         #----create default np array
         batch_dim = [len_path]
@@ -1468,6 +1475,13 @@ class tools():
             to_gray = True
 
         batch_data = np.zeros(batch_dim, dtype=dtype)
+        #----
+        return_ori_data = False
+        for name in return_ori_name:
+            if self.p_dict.get(name) is True:
+                return_ori_data = True
+                batch_data_no_patch = np.zeros_like(batch_data)
+                break
 
         #----setting dict process
         if to_process is True:
@@ -1476,7 +1490,7 @@ class tools():
                     if key == 'rdm_shift':
                         corner = np.random.randint(4, size=len_path)
                     if key == 'rdm_patch':
-                        batch_data_no_patch = np.zeros_like(batch_data)
+
                         margin_ratio = self.s_dict[key][0]
                         patch_ratio = self.s_dict[key][1]
                         size_min = self.s_dict[key][2]
@@ -1626,11 +1640,18 @@ class tools():
                                                       (center_x + lens[0], center_y + lens[1]),
                                                       color, -1)
                     if self.p_dict.get('rdm_perlin'):
+                        # ----put no patch image
+                        # img_no_patch = img.copy()
+                        img_no_patch = cv2.resize(img.copy(), (output_shape[1], output_shape[0]))
+                        img_no_patch = self.img_transform(img_no_patch, to_rgb=to_rgb, to_gray=to_gray)
+                        batch_data_no_patch[idx] = img_no_patch
                         #img = cv2.resize(img, (output_shape[1], output_shape[0]))
                         # mask,img_back = self.get_perlin_noise(output_shape[:-1],res=(16,16))
                         # img = self.add_noise_by_perlin(img,self.rdm_perlin)
                         # img = self.add_noise_by_perlin_w_mask(img,self.rdm_perlin)
                         img = self.rdmPerlin(img=img)
+                    if self.p_dict.get('rdm_light_defect'):
+                        img = self.rdmLightDefect(img=img)
 
 
                 #----resize and change the color format
@@ -1648,7 +1669,8 @@ class tools():
 
         #----return value process
         if to_process is True:
-            if self.p_dict.get('rdm_patch'):
+
+            if return_ori_data:
                 if to_norm is True:
                     batch_data_no_patch /= 255
                 return batch_data_no_patch, batch_data
@@ -1951,6 +1973,1562 @@ class tools():
     #
     #     return b,img_back
 
+class tools_v2():
+    def __init__(self, pipelines=None,print_out=False):
+        self.p_dict = dict()
+        self.s_dict = dict()
+        self.class_name2id = dict()
+        self.id2color = dict()
+        self.p_name_list = list()
+        self.shape_keys = [
+            "label",
+            "points",
+            "group_id",
+            "shape_type",
+            "flags",
+        ]
+        self.print_out = print_out
+        self.transforms = self.pipeline2transform(pipelines)
+
+        # ----
+        # img_dir = r"D:\dataset\nature\natural_images\flower"
+        # self.paths_flower = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in img_format]
+
+    def pipeline2transform(self, pipelines):
+        transforms = []
+        if isinstance(pipelines,list):
+            process_name_list = list(process_dict.keys())
+            for pipeline in pipelines:
+                if pipeline.get('type') in process_name_list:
+                    process_name = pipeline['type']
+                    param_dict = dict()
+                    for key, value in pipeline.items():
+                        if key != 'type':
+                            param_dict[key] = value
+
+                    transforms.append(process_dict[process_name](**param_dict))
+
+        return transforms
+
+    def get_paths(self, img_source):
+        # ----var
+        paths = list()
+        if not isinstance(img_source, list):
+            img_source = [img_source]
+
+        for img_dir in img_source:
+            temp = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in img_format]
+            if len(temp) == 0:
+                say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir))
+            else:
+                paths.extend(temp)
+
+        return np.array(paths), len(paths)
+
+    def get_subdir_paths(self, img_source):
+        # ----var
+        dirs = list()
+        paths = list()
+        if not isinstance(img_source, list):
+            img_source = [img_source]
+
+        # ----collect all subdirs
+        for img_dir in img_source:
+            dirs_temp = [obj.path for obj in os.scandir(img_dir) if obj.is_dir()]
+            dirs.extend(dirs_temp)
+
+        for dir_path in dirs:
+            temp = [file.path for file in os.scandir(dir_path) if file.name.split(".")[-1] in img_format]
+            if len(temp) == 0:
+                say_sth("Warning:資料夾內沒有找到支援的圖片檔案:{}".format(dir_path), print_out=self.print_out)
+            else:
+                paths.extend(temp)
+
+        return np.array(paths), len(paths)
+
+    def create_label_png(self, img_dir, to_show=False, to_save=True, margin=10):
+        w_text = 200
+        paths, json_paths, qty = self.get_subdir_paths_withJsonCheck([img_dir])
+
+        # img_index = draw_color_index(list(self.class_name2id.keys()))
+        colormap = imgviz.label_colormap()
+        class_names = list(self.class_name2id.keys())
+
+        if qty == 0:
+            say_sth("Error: no matched files:{}".format(img_dir))
+        else:
+
+            for i in range(qty):
+                try:
+                    img = cv2.imdecode(np.fromfile(paths[i], dtype=np.uint8), 1)
+                except:
+                    img = None
+
+                if img is None:
+                    msg = "read failed:".format(paths[i])
+                    say_sth(msg)
+                else:
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    label_shapes = self.get_label_shapes(json_paths[i])
+                    if label_shapes is None:
+                        continue
+                    lbl = self.shapes_to_label(
+                        img_shape=img.shape,
+                        shapes=label_shapes,
+                        label_name_to_value=self.class_name2id,
+                    )
+
+                    # ----
+                    label_img = img.copy()
+                    for label_num in np.unique(lbl):
+                        if label_num != 0:
+                            # print(label_num)
+                            coors = np.where(lbl == label_num)
+                            label_img[coors] = self.id2color[label_num]
+
+                    # ----create all zero background
+                    h, w = img.shape[:2]
+                    zeros = np.zeros([h + 2 * margin, 2 * w + 4 * margin + w_text, 3], dtype=np.uint8)
+
+                    img_h_end = margin + h
+                    img_w_end = margin + w
+                    zeros[margin:img_h_end, margin:img_w_end, :] = img
+                    zeros[margin:img_h_end, 2 * margin + img_w_end:-w_text - margin, :] = label_img
+
+                    # ----color index
+                    gap = 10
+                    unit = 30
+                    w_start = 2 * w + 3 * margin
+                    for idx, class_name in enumerate(class_names):
+                        if idx > 0:
+                            s_point = (w_start, margin + idx * (unit + gap))
+
+                            color = []
+                            for v in colormap[idx]:
+                                color.append(int(v))  # color數值範圍可以是int or float
+                            # color = tuple(color)#color不一定要轉成tuple，使用list也可以
+                            # print(color)
+
+                            # ----add color map
+                            # ----add class name text
+                            cv2.putText(zeros, class_name, s_point,
+                                        cv2.FONT_HERSHEY_PLAIN,
+                                        1.5, color, 2)
+
+                    # ----save type
+                    # if save_type == 'ori+label':
+                    #     save_img = cv2.addWeighted(img, 0.5, zeros, 0.5, 0)
+                    # else:
+                    #     save_img = zeros
+
+                    # plt.figure(num=1,figsize=(512,837),clear=True)
+                    # plt.subplot(1,3,1)
+                    # plt.imshow(img)
+                    # plt.axis('off')
+                    # plt.subplot(1,3,2)
+                    # plt.imshow(label_img)
+                    # plt.axis('off')
+                    #
+                    # plt.subplot(1,3,3)
+                    # plt.imshow(img_index)
+                    # plt.axis('off')
+                    # if to_show:
+                    #     plt.show()
+
+                    # ----save image
+                    if to_save:
+                        save_dir = os.path.dirname(paths[i])
+                        save_dir = os.path.join(save_dir, 'label_img')
+                        if not os.path.exists(save_dir):
+                            os.makedirs(save_dir)
+
+                        save_path = os.path.join(save_dir, paths[i].split("\\")[-1])
+                        print(save_path)
+                        ext = paths[i].split(".")[-1]
+                        cv2.imencode('.{}'.format(ext), zeros[:, :, ::-1])[1].tofile(save_path)
+
+    def get_subdir_paths_withJsonCheck(self, img_source):
+        # ----var
+        dirs = list()
+        paths = list()
+        json_paths = list()
+        if not isinstance(img_source, list):
+            img_source = [img_source]
+
+        # ----collect all subdirs
+        # for img_dir in img_source:
+        #     dirs_temp = [obj.path for obj in os.scandir(img_dir) if obj.is_dir()]
+        #     dirs.extend(dirs_temp)
+
+        for dir_path in img_source:
+            names = [file.name for file in os.scandir(dir_path) if file.name.split(".")[-1] in img_format]
+            if len(names) == 0:
+                say_sth("Warning:資料夾內沒有找到支援的圖片檔案:{}".format(dir_path), print_out=self.print_out)
+            else:
+                for name in names:
+                    json_path = os.path.join(dir_path, name.split(".")[0] + '.json')
+                    if os.path.exists(json_path):
+                        paths.append(os.path.join(dir_path, name))
+                        json_paths.append(json_path)
+                    else:
+                        say_sth("Warning:json檔不存在:{}".format(json_path), print_out=self.print_out)
+
+        return np.array(paths), np.array(json_paths), len(paths)
+
+    def get_relative_json_files(self, paths):
+        json_paths = []
+        msg_list = []
+
+        for path in paths:
+            ext = path.split(".")[-1]
+            json_path = path.strip(ext) + 'json'
+            if os.path.exists(json_path):
+                json_paths.append(json_path)
+            else:
+                json_paths.append(None)
+                msg_list.append("json file不存在:{}".format(json_path))
+
+        if self.print_out:
+            for msg in msg_list:
+                say_sth(msg, print_out=True)
+
+        return np.array(json_paths)
+
+    def get_ite_data(self, paths, ite_num, batch_size=16, labels=None):
+        num_start = batch_size * ite_num
+        num_end = np.minimum(num_start + batch_size, len(paths))
+
+        if labels is None:
+            return paths[num_start:num_end]
+        else:
+            return paths[num_start:num_end], labels[num_start:num_end]
+
+    def set_target(self, target_dict):
+        t_compare = False
+        name_list = ['loss']
+
+        if target_dict is not None:
+            t_type = target_dict.get('type')
+            t_value = target_dict.get('value')
+            t_times = target_dict.get('hit_target_times')
+
+            if t_type in name_list:
+                if t_value is not None:
+                    if t_times is not None:
+                        try:
+                            t_compare = True
+                            self.t_type = t_type
+                            self.t_value = float(t_value)
+                            self.t_times = int(t_times)
+                            self.t_count = 0
+                        except:
+                            print("set_target failed!!")
+
+        self.t_compare = t_compare
+
+    def target_compare(self, data_dict):
+        re = False
+        if self.t_compare is True:
+            if data_dict['loss_method'] == 'ssim':
+                if data_dict[self.t_type] > self.t_value:
+                    self.t_count += 1
+            else:
+                if data_dict[self.t_type] < self.t_value:
+                    self.t_count += 1
+
+            # ----
+            if self.t_count >= self.t_times:
+                re = True
+
+        return re
+
+    def set_process(self, process_dict, ori_setting_dict, print_out=False):
+        noise_img_dir = r".\perlin_noise"
+        color_img_dir = r".\car"
+        setting_dict = ori_setting_dict.copy()
+        perlin_default_dict = dict(mode='nature', area_range=[30, 1000], defect_num=5, pixel_range=[210, 250])
+        lightDefect_default_dict = dict(area_range=[500, 1000], defect_num=3, pixel_range=[7, 12], zoom_in=0, p=0.5)
+
+        default_set_dict = {
+            'ave_filter': (3, 3), 'gau_filter': (3, 3), 'rdm_shift': 0.1, 'rdm_br': np.array([0.88, 1.12]),
+            'rdm_flip': [1, 0, -1, 2], 'rdm_blur': [1, 1, 1, 3, 3, 3, 5, 5], 'rdm_angle': [-5, 5],
+            'rdm_patch': [0.25, 0.3, 10], 'rdm_perlin': perlin_default_dict,
+            'rdm_light_defect': lightDefect_default_dict,
+            'rdm_br_ct': np.array([0.2, 0.2])}
+        '''
+        rdm_patch:
+            margin_ratio = 0.25
+            patch_ratio = 0.3
+            size_min = 10
+        rdm_perlin:
+            area range lower limit = 30
+            area range upper limit = 1000
+            defect number = 5
+
+        rdm_br_ct:
+            br_ratio = 0.2
+            ct_ratio = 0.2
+        '''
+        p_name_list = list(default_set_dict.keys())
+        if setting_dict is None:
+            setting_dict = dict()
+
+        for key, value in process_dict.items():
+            if value is True:
+                if setting_dict.get(key) is None:
+                    setting_dict[key] = default_set_dict.get(key)  # 保證只要process是True，就會有對應的範圍值
+                elif key == 'rdm_br':
+                    br_range = setting_dict[key]
+                    if br_range > 0 and br_range <= 1:
+                        setting_dict[key] = np.array([1 - br_range, 1 + br_range])
+                elif key == 'rdm_angle':
+                    angle_range = setting_dict[key]
+                    if angle_range > 0 and angle_range <= 90:
+                        setting_dict[key] = [-angle_range, angle_range]
+                # ----perlin image process
+                if key == 'rdm_perlin':
+                    # self.rdmPerlin = RandomPerlin(noise_img_dir=setting_dict[key][0],
+                    #                               color_img_dir=setting_dict[key][1],
+                    #                               mode='nature',
+                    #                               area_range=setting_dict[key][2:4],
+                    #                               defect_num=setting_dict[key][-1])
+                    self.rdmPerlin = RandomPerlin(noise_img_dir=noise_img_dir, color_img_dir=color_img_dir,
+                                                  **setting_dict[key])
+                    # self.rdm_perlin = dict()
+                    #
+                    # paths_noise = [file.path for file in os.scandir(setting_dict[key][0]) if file.name.split(".")[-1] == 'png']
+                    # qty_n = len(paths_noise)
+                    # msg = "Perlin noise image qty:{}".format(qty_n)
+                    # say_sth(msg,print_out=print_out)
+                    #
+                    # paths_color = [file.path for file in os.scandir(setting_dict[key][1]) if
+                    #                 file.name.split(".")[-1] in img_format]
+                    # qty_c = len(paths_color)
+                    # msg = "Color image qty:{}".format(qty_c)
+                    # say_sth(msg, print_out=print_out)
+                    #
+                    # self.rdm_perlin['paths_noise'] = paths_noise
+                    # self.rdm_perlin['paths_color'] = paths_color
+                    # self.rdm_perlin['pixel_range'] = setting_dict[key][2:4]
+                    # self.rdm_perlin['defect_num'] = setting_dict[key][-1]
+                if key == 'rdm_light_defect':
+                    self.rdmLightDefect = RandomLightDefect(noise_img_dir=noise_img_dir, **setting_dict[key])
+
+        self.p_dict = process_dict
+        self.s_dict = setting_dict
+        self.p_name_list = p_name_list
+
+    def get_label_shapes(self, json_path):
+
+        # keys = [
+        #     "version",
+        #     "imageData",
+        #     "imagePath",
+        #     "shapes",  # polygonal annotations
+        #     "flags",  # image level flags
+        #     "imageHeight",
+        #     "imageWidth",
+        # ]
+
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                shapes = [
+                    dict(
+                        label=s["label"],
+                        points=s["points"],
+                        shape_type=s.get("shape_type", "polygon"),
+                        flags=s.get("flags", {}),
+                        group_id=s.get("group_id"),
+                        other_data={
+                            k: v for k, v in s.items() if k not in self.shape_keys
+                        },
+                    )
+                    for s in data["shapes"]
+                ]
+            return shapes
+        except:
+            print("Warning: read failed {}".format(json_path))
+            return None
+
+    def shapes_to_label(self, img_shape, shapes, label_name_to_value):
+        dtype = np.uint8
+
+        # if len(label_name_to_value) > 128:
+        #     dtype = np.int16
+
+        cls = np.zeros(img_shape[:2], dtype=dtype)
+        # ins = np.zeros_like(cls)
+        # instances = []
+        for shape in shapes:
+            points = shape["points"]
+            label = shape["label"]
+            group_id = shape.get("group_id")
+            if group_id is None:
+                group_id = uuid.uuid1()
+            shape_type = shape.get("shape_type", None)
+
+            # cls_name = label
+            # instance = (cls_name, group_id)
+            #
+            # if instance not in instances:
+            #     instances.append(instance)
+            # ins_id = instances.index(instance) + 1
+            cls_id = label_name_to_value[label]
+
+            mask = self.shape_to_mask(img_shape[:2], points, shape_type)
+            cls[mask] = cls_id
+            # ins[mask] = ins_id
+
+        return cls
+
+    def shape_to_mask(self,
+                      img_shape, points, shape_type=None, line_width=10, point_size=5
+                      ):
+        mask = np.zeros(img_shape[:2], dtype=np.uint8)
+        mask = PIL.Image.fromarray(mask)
+        draw = PIL.ImageDraw.Draw(mask)
+        xy = [tuple(point) for point in points]
+        if shape_type == "circle":
+            assert len(xy) == 2, "Shape of shape_type=circle must have 2 points"
+            (cx, cy), (px, py) = xy
+            d = math.sqrt((cx - px) ** 2 + (cy - py) ** 2)
+            draw.ellipse([cx - d, cy - d, cx + d, cy + d], outline=1, fill=1)
+        elif shape_type == "rectangle":
+            assert len(xy) == 2, "Shape of shape_type=rectangle must have 2 points"
+            draw.rectangle(xy, outline=1, fill=1)
+        elif shape_type == "line":
+            assert len(xy) == 2, "Shape of shape_type=line must have 2 points"
+            draw.line(xy=xy, fill=1, width=line_width)
+        elif shape_type == "linestrip":
+            draw.line(xy=xy, fill=1, width=line_width)
+        elif shape_type == "point":
+            assert len(xy) == 1, "Shape of shape_type=point must have 1 points"
+            cx, cy = xy[0]
+            r = point_size
+            draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=1, fill=1)
+        else:
+            assert len(xy) > 2, "Polygon must have points more than 2"
+            draw.polygon(xy=xy, outline=1, fill=1)
+        mask = np.array(mask, dtype=bool)
+        return mask
+
+    def resize_label(self, lbl, resize, to_process=False, rdm_angle=False, M=None):
+        # resize format: [w,h]
+        coor_dict = dict()
+        h, w = lbl.shape
+        for label_num in np.unique(lbl):
+            if label_num != 0:
+                # ----取出每一種label number的座標
+                coor_dict[label_num] = np.where(lbl == label_num)
+
+        for label_num in coor_dict.keys():
+            # ----新建zeros陣列(shape是未resize的label map)
+            z_temp = np.zeros_like(lbl)
+            # ----將對應label number的座標處都填上1
+            z_temp[coor_dict[label_num]] = 1
+            # ----旋轉
+            if to_process is True and rdm_angle is True:
+                # M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
+                z_temp = cv2.warpAffine(z_temp, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+
+            # ----對z_temp進行resize(因為數值都是1，resize不會產生其他的數值)
+            z_temp = cv2.resize(z_temp, resize)
+            # ----取出resize後，對應label number的座標值
+            coor_dict[label_num] = np.where(z_temp == 1)
+
+        z_temp = np.zeros([resize[1], resize[0]], dtype=np.uint8)
+        # print("z_temp shape:",z_temp.shape)
+        for label_num in coor_dict.keys():
+            z_temp[coor_dict[label_num]] = label_num
+        return z_temp
+
+    def batch_resize_label(self, lbl_array, resize):
+        shape = [lbl_array.shape[0], resize[1], resize[0]]
+        re_array = np.zeros(shape, dtype=lbl_array.dtype)
+
+        for i, lbl in enumerate(lbl_array):
+            lbl = self.resize_label(lbl, resize)
+            re_array[i] = lbl
+
+        return re_array
+
+    def get_single_label_png(self, path, json_path):
+        save_img = None
+        try:
+            img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), 1)
+        except:
+            img = None
+
+        if img is None:
+            msg = "read failed:".format(path)
+            say_sth(msg)
+        else:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            label_shapes = self.get_label_shapes(json_path)
+            if label_shapes is None:
+                say_sth("label_shapes is None")
+            lbl = self.shapes_to_label(
+                img_shape=img.shape,
+                shapes=label_shapes,
+                label_name_to_value=self.class_name2id,
+            )
+            # print(np.unique(lbl))
+            # ----
+            zeros = np.zeros_like(img)
+            for label_num in np.unique(lbl):
+                if label_num != 0:
+                    # print(label_num)
+                    coors = np.where(lbl == label_num)
+                    zeros[coors] = self.id2color[label_num]
+            save_img = cv2.addWeighted(img, 0.5, zeros, 0.5, 0)
+
+        return save_img
+
+    def get_4D_img_label_data(self, paths, output_shape, json_paths=None, to_norm=True, to_rgb=True, to_process=False,
+                              dtype='float32', to_save_label=False):
+        len_path = len(paths)
+        to_gray = False
+        M = None
+        json_exist = True
+
+        # ----create default np array
+        batch_dim = [len_path]
+        batch_dim.extend(output_shape)
+        if batch_dim[-1] == 1:
+            to_gray = True
+
+        batch_data = np.zeros(batch_dim, dtype=dtype)
+
+        # ----label data: gray images
+        batch_data_label = np.zeros(batch_dim[:-1], dtype=np.uint8)
+
+        # ----setting dict process
+        if to_process is True:
+            if self.p_dict.get('rdm_shift'):
+                corner = np.random.randint(4, size=len_path)
+            if self.p_dict.get('rdm_br_ct'):
+                br_ratios = np.random.random(size=len_path)
+                br_ratios *= self.s_dict['rdm_br_ct'][0]
+                ct_ratios = np.random.random(size=len_path)
+                ct_ratios *= self.s_dict['rdm_br_ct'][1]
+                ct_ratios *= 47
+                ct_ratios += 1.0
+            if self.p_dict.get('rdm_br'):
+                # ----方法1(較慢)
+                # set_range = self.s_dict['rdm_br'] * 100
+                # print("set_range:",set_range)
+                # br_factors = np.random.randint(set_range[0],set_range[1],size=len_path)
+                # br_factors = br_factors.astype(np.float16)
+                # br_factors /= 100
+                # ----方法2(較快)
+                br_factors = np.random.random(size=len_path)
+                br_factors *= (self.s_dict['rdm_br'][1] - self.s_dict['rdm_br'][0])
+                br_factors += self.s_dict['rdm_br'][0]
+                # br_factors = br_factors.astype(np.float16)#從float32轉換成float16會花較長的時間
+                # print("br_factors:",br_factors)
+
+            # if self.p_dict.get('rdm_patch'):
+            #     batch_data_no_patch = np.zeros_like(batch_data)
+            # if self.p_dict.get('rdm_patch'):
+            #     margin_ratio = self.s_dict['rdm_patch'][0]
+            #     patch_ratio = self.s_dict['rdm_patch'][1]
+            #     size_min = self.s_dict['rdm_patch'][2]
+
+        # ----read images and do processing
+        for idx, path in enumerate(paths):
+            try:
+                img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), 1)
+            except:
+                img = None
+
+            if img is None:
+                msg = "read failed:".format(path)
+                say_sth(msg)
+            else:
+                # d_t = time.time()
+                # ----get the NPY path
+                ext = path.split(".")[-1]
+                npy_path = path.strip(ext) + 'npy'
+
+                if os.path.exists(npy_path):
+                    lbl = np.load(npy_path)
+                else:
+                    # ----decide the json path
+                    if json_paths is None:
+                        json_path = path.strip(ext) + 'json'
+                    else:
+                        json_path = json_paths[idx]
+                        if json_path is None or json_path == '':
+                            json_path = path.strip(ext) + 'json'
+
+                    # ----read the json file
+                    if not os.path.exists(json_path):
+                        lbl = np.zeros(img.shape[:-1], dtype=np.uint8)
+                        json_exist = False
+                    else:
+                        label_shapes = self.get_label_shapes(json_path)
+                        if label_shapes is None:
+                            continue
+                        try:
+                            lbl = self.shapes_to_label(
+                                img_shape=img.shape,
+                                shapes=label_shapes,
+                                label_name_to_value=self.class_name2id,
+                            )
+                        except:
+                            print("label Error:", json_path)
+
+                    if to_save_label is True:
+                        np.save(npy_path, lbl)
+                # d_t = time.time() - d_t
+                # print("read label time:",d_t)
+                # print(np.unique(lbl))
+
+                if to_process is True:
+
+                    ori_h, ori_w, _ = img.shape
+                    if self.p_dict.get('rdm_br_ct'):
+                        ave_pixel = np.mean(img)
+                        img = (img - ave_pixel * (1 - br_ratios[idx])) * ct_ratios[idx] + ave_pixel * (
+                                    1 + br_ratios[idx])
+                        img = np.clip(img, 0, 255)
+                        img = img.astype(np.uint8)
+                    if self.p_dict.get('ave_filter'):
+                        img = cv2.blur(img, self.s_dict['ave_filter'])
+                    if self.p_dict.get('gau_filter'):
+                        img = cv2.GaussianBlur(img, self.s_dict['gau_filter'], 0, 0)
+                    if self.p_dict.get('rdm_shift'):
+                        c = corner[idx]
+                        y = np.random.randint(ori_h * self.s_dict['rdm_shift'])
+                        x = np.random.randint(ori_w * self.s_dict['rdm_shift'])
+                        p = int(round((y + x) / 2))
+                        # print("x={},y={},p={}".format(x,y,p))
+                        if c == 0:
+                            img = img[p:, p:, :]
+                            lbl = lbl[p:, p:]
+                        elif c == 1:
+                            img = img[p:, :-(p + 1), :]
+                            lbl = lbl[p:, :-(p + 1)]
+                        elif c == 2:
+                            img = img[:-(p + 1), p:, :]
+                            lbl = lbl[:-(p + 1), p:]
+                        elif c == 3:
+                            img = img[:-(p + 1), :-(p + 1), :]
+                            lbl = lbl[:-(p + 1), :-(p + 1)]
+                        else:
+                            img = img[p:, p:, :]
+                            lbl = lbl[p:, p:]
+                    if self.p_dict.get('rdm_br'):
+                        # mean_br = np.mean(img)
+                        try:
+                            # br_factor = np.random.randint(math.floor(mean_br * self.s_dict['rdm_br'][0]),
+                            #                               math.ceil(mean_br * self.s_dict['rdm_br'][1]))
+                            # print("br_factor:",br_factors[idx])
+                            img = np.clip(img * br_factors[idx], 0, 255)
+                            img = img.astype(np.uint8)
+                        except:
+                            msg = "Error:rdm_br value"
+                            say_sth(msg)
+                    if self.p_dict.get('rdm_flip'):
+                        flip_type = np.random.choice(self.s_dict['rdm_flip'])
+                        if flip_type != 2:
+                            img = cv2.flip(img, flip_type)
+                            lbl = cv2.flip(lbl, flip_type)
+                    if self.p_dict.get('rdm_blur'):
+                        kernel = tuple(np.random.choice(self.s_dict['rdm_blur'], size=2))
+                        # print("kernel:", kernel)
+                        if np.random.randint(0, 2) == 0:
+                            img = cv2.blur(img, kernel)
+                        else:
+                            img = cv2.GaussianBlur(img, kernel, 0, 0)
+                    # if self.p_dict.get('rdm_noise'):
+                    #     uniform_noise = np.empty((img.shape[0], img.shape[1]), dtype=np.uint8)
+                    #     cv2.randu(uniform_noise, 0, 255)
+                    #     ret, impulse_noise = cv2.threshold(uniform_noise, 230, 255, cv2.THRESH_BINARY_INV)
+                    #     img = cv2.bitwise_and(img, img, mask=impulse_noise)
+                    if self.p_dict.get('rdm_angle'):
+                        angle = np.random.randint(self.s_dict['rdm_angle'][0], self.s_dict['rdm_angle'][1])
+                        h, w = img.shape[:2]  # 要重新讀一次shape是因為若有經過shift，尺寸會改變
+                        M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
+                        img = cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+                        lbl = cv2.warpAffine(lbl, M, (w, h), borderMode=cv2.BORDER_REPLICATE, flags=cv2.INTER_NEAREST)
+                    if self.p_dict.get('rdm_perlin'):
+                        if json_exist is False:
+                            img = self.rdmPerlin(img=img)
+                            json_exist = True
+                    # if self.p_dict.get('rdm_patch'):
+                    #     #----put no patch image
+                    #     # img_no_patch = img.copy()
+                    #     img_no_patch = cv2.resize(img.copy(), (output_shape[1], output_shape[0]))
+                    #     img_no_patch = self.img_transform(img_no_patch, to_rgb=to_rgb, to_gray=to_gray)
+                    #     batch_data_no_patch[idx] = img_no_patch
+                    #     # ----
+                    #     maxi_len = int(sum(img.shape[:2]) / 2 * patch_ratio)
+                    #     patch_times = np.random.randint(1, 4)
+                    #     patch_types = np.random.randint(0, 4, patch_times)
+                    #     margin_x = margin_ratio * img.shape[1]
+                    #     margin_y = margin_ratio * img.shape[0]
+                    #     for patch_type in patch_types:
+                    #         center_x = np.random.randint(margin_x, img.shape[1] - margin_x)
+                    #         center_y = np.random.randint(margin_y, img.shape[0] - margin_y)
+                    #         if np.random.randint(2) == 1:
+                    #             color = (0, 0, 0)
+                    #         else:
+                    #             color = np.random.randint(0, 255, 3).tolist()
+                    #         if patch_type == 0:
+                    #             end_x = np.random.randint(size_min, maxi_len / 2)
+                    #             # end_y = np.random.randint(center_y,img.shape[0])
+                    #             cv2.rectangle(img, (center_x, center_y), (center_x + end_x, center_y + end_x), color,
+                    #                           -1)
+                    #             # print("square,center_x:{},center_y:{},len:{}".format(center_x, center_y, end_x))
+                    #         elif patch_type == 1:
+                    #             radius = np.random.randint(size_min, maxi_len / 2)
+                    #             cv2.circle(img, (center_x, center_y), radius, color, -1)
+                    #             # print("circle,center_x:{},center_y:{},radius:{}".format(center_x, center_y, radius))
+                    #         elif patch_type == 2:  # rectangle_1
+                    #             lens = np.random.randint(size_min, maxi_len / 2, 2)
+                    #             cv2.rectangle(img, (center_x, center_y), (center_x + lens[0], center_y + lens[1]),
+                    #                           color, -1)
+                    #             # print("rectangle,center_x:{},center_y:{},len:{}".format(center_x, center_y, lens))
+                    #         elif patch_type == 3:  # rectangle_2
+                    #             ave_size = sum(img.shape[:2]) / 2
+                    #             long_len = np.random.randint(ave_size // 2, ave_size * 0.9)
+                    #             short_len = np.random.randint(3, ave_size // 4)
+                    #             if center_x >= ave_size // 2:
+                    #                 if center_y >= ave_size // 2:
+                    #                     pass
+                    #                 else:
+                    #                     cv2.rectangle(img, (center_x, center_y),
+                    #                                   (center_x + short_len, center_y + long_len),
+                    #                                   color, -1)
+                    #             else:
+                    #                 if center_y >= ave_size // 2:
+                    #                     cv2.rectangle(img, (center_x, center_y),
+                    #                                   (center_x + long_len, center_y + short_len),
+                    #                                   color, -1)
+                    #                 else:
+                    #                     lens = [long_len, short_len]
+                    #                     np.random.shuffle(lens)
+                    #                     cv2.rectangle(img, (center_x, center_y),
+                    #                                   (center_x + lens[0], center_y + lens[1]),
+                    #                                   color, -1)
+
+                # ----resize and change the color format
+                img = cv2.resize(img, (output_shape[1], output_shape[0]))
+                lbl = cv2.resize(lbl, (output_shape[1], output_shape[0]), interpolation=cv2.INTER_NEAREST)
+                # ----show the lbl image(before and after resize)
+                # img_lbl = np.where(lbl > 0,255,0).astype(np.uint8)
+                # lbl = self.resize_label(lbl,(output_shape[1], output_shape[0]), to_process=to_process,
+                #                         rdm_angle=self.p_dict.get('rdm_angle'),M=M)
+
+                # img_lbl_r = np.where(lbl > 0,255,0).astype(np.uint8)
+                # plt.subplot(1,2,1)
+                # plt.imshow(img_lbl, cmap='gray')
+                # plt.title('label before resize')
+                # plt.subplot(1, 2, 2)
+                # plt.imshow(img_lbl_r, cmap='gray')
+                # plt.title('label after resize')
+                # plt.show()
+
+                if to_gray is True:
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    img = np.expand_dims(img, axis=-1)
+                elif to_rgb is True:
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                batch_data[idx] = img
+                batch_data_label[idx] = lbl
+
+        if to_norm is True:
+            batch_data /= 255
+
+        # ----return value process
+        return batch_data, batch_data_label
+        # if to_process is True:
+        #     if self.p_dict.get('rdm_patch'):
+        #         if to_norm is True:
+        #             batch_data_no_patch /= 255
+        #         return batch_data_no_patch, batch_data
+        #     else:
+        #         return batch_data
+        # else:
+        #     return batch_data
+
+    def get_4D_data(self, paths, output_shape, to_norm=True, to_rgb=True, to_process=False, dtype='float32'):
+        len_path = len(paths)
+        to_gray = False
+        key_list = ['rdm_shift', 'rdm_patch', 'rdm_br_ct', 'rdm_br']
+        return_ori_name = ['rdm_patch', 'rdm_perlin', 'rdm_light_defect']
+
+        # ----create default np array
+        batch_dim = [len_path]
+        batch_dim.extend(output_shape)
+        if batch_dim[-1] == 1:
+            to_gray = True
+
+        batch_data = np.zeros(batch_dim, dtype=dtype)
+        # ----
+        return_ori_data = False
+        for name in return_ori_name:
+            if self.p_dict.get(name) is True:
+                return_ori_data = True
+                batch_data_no_patch = np.zeros_like(batch_data)
+                break
+
+        # ----setting dict process
+        if to_process is True:
+            for key in key_list:
+                if self.p_dict.get(key):
+                    if key == 'rdm_shift':
+                        corner = np.random.randint(4, size=len_path)
+                    if key == 'rdm_patch':
+                        margin_ratio = self.s_dict[key][0]
+                        patch_ratio = self.s_dict[key][1]
+                        size_min = self.s_dict[key][2]
+                    if key == "rdm_br_ct":
+                        br_ratios = np.random.random(size=len_path)
+                        br_ratios *= self.s_dict['rdm_br_ct'][0]
+                        ct_ratios = np.random.random(size=len_path)
+                        ct_ratios *= self.s_dict['rdm_br_ct'][1]
+                        ct_ratios *= 47
+                        ct_ratios += 1.0
+                    if key == 'rdm_br':
+                        br_factors = np.random.random(size=len_path)
+                        br_factors *= (self.s_dict['rdm_br'][1] - self.s_dict['rdm_br'][0])
+                        br_factors += self.s_dict['rdm_br'][0]
+
+        # ----read images and do processing
+        for idx, path in enumerate(paths):
+            try:
+                img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), 1)
+            except:
+                img = None
+
+            if img is None:
+                msg = "read failed:".format(path)
+                say_sth(msg)
+            else:
+                if to_process is True:
+                    ori_h, ori_w, _ = img.shape
+                    if self.p_dict.get('rdm_br_ct'):
+                        ave_pixel = np.mean(img)
+                        img = (img - ave_pixel * (1 - br_ratios[idx])) * ct_ratios[idx] + ave_pixel * (
+                                1 + br_ratios[idx])
+                        img = np.clip(img, 0, 255)
+                        img = img.astype(np.uint8)
+                        # print("br_ratio:{},ct_ratio:{}".format(br_ratios[idx],ct_ratios[idx]))
+                    if self.p_dict.get('ave_filter'):
+                        img = cv2.blur(img, self.s_dict['ave_filter'])
+                    if self.p_dict.get('gau_filter'):
+                        img = cv2.GaussianBlur(img, self.s_dict['gau_filter'], 0, 0)
+                    if self.p_dict.get('rdm_shift'):
+                        c = corner[idx]
+                        y = np.random.randint(ori_h * self.s_dict['rdm_shift'])
+                        x = np.random.randint(ori_w * self.s_dict['rdm_shift'])
+                        # p = int(round((y + x) / 2))
+                        p = (y + x) // 2
+                        # print("x={},y={},p={}".format(x,y,p))
+                        if c == 0:
+                            img = img[p:, p:, :]
+                        elif c == 1:
+                            img = img[p:, :-(p + 1), :]
+                        elif c == 2:
+                            img = img[:-(p + 1), p:, :]
+                        elif c == 3:
+                            img = img[:-(p + 1), :-(p + 1), :]
+                        else:
+                            img = img[p:, p:, :]
+                    if self.p_dict.get('rdm_br'):
+                        try:
+                            img = np.clip(img * br_factors[idx], 0, 255)
+                            img = img.astype(np.uint8)
+                        except:
+                            msg = "Error:rdm_br value"
+                            say_sth(msg)
+                    if self.p_dict.get('rdm_flip'):
+                        flip_type = np.random.choice(self.s_dict['rdm_flip'])
+                        if flip_type != 2:
+                            img = cv2.flip(img, flip_type)
+                    if self.p_dict.get('rdm_blur'):
+                        kernel = tuple(np.random.choice(self.s_dict['rdm_blur'], size=2))
+                        # print("kernel:", kernel)
+                        if np.random.randint(0, 2) == 0:
+                            img = cv2.blur(img, kernel)
+                        else:
+                            img = cv2.GaussianBlur(img, kernel, 0, 0)
+                    if self.p_dict.get('rdm_noise'):
+                        uniform_noise = np.empty((img.shape[0], img.shape[1]), dtype=np.uint8)
+                        cv2.randu(uniform_noise, 0, 255)
+                        ret, impulse_noise = cv2.threshold(uniform_noise, 230, 255, cv2.THRESH_BINARY_INV)
+                        img = cv2.bitwise_and(img, img, mask=impulse_noise)
+                    if self.p_dict.get('rdm_angle'):
+                        angle = np.random.randint(self.s_dict['rdm_angle'][0], self.s_dict['rdm_angle'][1])
+                        h, w = img.shape[:2]
+                        M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
+                        img = cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+                    if self.p_dict.get('rdm_patch'):
+                        # ----put no patch image
+                        # img_no_patch = img.copy()
+                        img_no_patch = cv2.resize(img.copy(), (output_shape[1], output_shape[0]))
+                        img_no_patch = self.img_transform(img_no_patch, to_rgb=to_rgb, to_gray=to_gray)
+                        batch_data_no_patch[idx] = img_no_patch
+                        # ----
+                        maxi_len = int(sum(img.shape[:2]) / 2 * patch_ratio)
+                        patch_times = np.random.randint(1, 4)
+                        patch_types = np.random.randint(0, 4, patch_times)
+                        margin_x = margin_ratio * img.shape[1]
+                        margin_y = margin_ratio * img.shape[0]
+                        mean = np.mean(img)
+                        for patch_type in patch_types:
+                            center_x = np.random.randint(margin_x, img.shape[1] - margin_x)
+                            center_y = np.random.randint(margin_y, img.shape[0] - margin_y)
+                            # ----choose colors
+                            if mean > 127:
+                                color = np.random.randint(224, 255, 1).tolist() * 3
+                            else:
+                                color = np.random.randint(0, 32, 1).tolist() * 3
+
+                            # if np.random.randint(2) == 1:
+                            #     color = (0, 0, 0)
+                            # else:
+                            #     color = np.random.randint(0, 255, 3).tolist()
+                            if patch_type == 0:
+                                end_x = np.random.randint(size_min, maxi_len / 2)
+                                # end_y = np.random.randint(center_y,img.shape[0])
+                                cv2.rectangle(img, (center_x, center_y), (center_x + end_x, center_y + end_x), color,
+                                              -1)
+                                # print("square,center_x:{},center_y:{},len:{}".format(center_x, center_y, end_x))
+                            elif patch_type == 1:
+                                radius = np.random.randint(size_min, maxi_len / 2)
+                                cv2.circle(img, (center_x, center_y), radius, color, -1)
+                                # print("circle,center_x:{},center_y:{},radius:{}".format(center_x, center_y, radius))
+                            elif patch_type == 2:  # rectangle_1
+                                lens = np.random.randint(size_min, maxi_len / 2, 2)
+                                cv2.rectangle(img, (center_x, center_y), (center_x + lens[0], center_y + lens[1]),
+                                              color, -1)
+                                # print("rectangle,center_x:{},center_y:{},len:{}".format(center_x, center_y, lens))
+                            elif patch_type == 3:  # rectangle_2
+                                ave_size = sum(img.shape[:2]) / 2
+                                long_len = np.random.randint(ave_size // 2, ave_size * 0.9)
+                                short_len = np.random.randint(3, ave_size // 4)
+                                if center_x >= ave_size // 2:
+                                    if center_y >= ave_size // 2:
+                                        pass
+                                    else:
+                                        cv2.rectangle(img, (center_x, center_y),
+                                                      (center_x + short_len, center_y + long_len),
+                                                      color, -1)
+                                else:
+                                    if center_y >= ave_size // 2:
+                                        cv2.rectangle(img, (center_x, center_y),
+                                                      (center_x + long_len, center_y + short_len),
+                                                      color, -1)
+                                    else:
+                                        lens = [long_len, short_len]
+                                        np.random.shuffle(lens)
+                                        cv2.rectangle(img, (center_x, center_y),
+                                                      (center_x + lens[0], center_y + lens[1]),
+                                                      color, -1)
+                    if self.p_dict.get('rdm_perlin'):
+                        # ----put no patch image
+                        # img_no_patch = img.copy()
+                        img_no_patch = cv2.resize(img.copy(), (output_shape[1], output_shape[0]))
+                        img_no_patch = self.img_transform(img_no_patch, to_rgb=to_rgb, to_gray=to_gray)
+                        batch_data_no_patch[idx] = img_no_patch
+                        # img = cv2.resize(img, (output_shape[1], output_shape[0]))
+                        # mask,img_back = self.get_perlin_noise(output_shape[:-1],res=(16,16))
+                        # img = self.add_noise_by_perlin(img,self.rdm_perlin)
+                        # img = self.add_noise_by_perlin_w_mask(img,self.rdm_perlin)
+                        img = self.rdmPerlin(img=img)
+                    if self.p_dict.get('rdm_light_defect'):
+                        img = self.rdmLightDefect(img=img)
+
+                # ----resize and change the color format
+                img = cv2.resize(img, (output_shape[1], output_shape[0]))
+
+                if to_gray is True:
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    img = np.expand_dims(img, axis=-1)
+                elif to_rgb is True:
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                batch_data[idx] = img
+
+        if to_norm is True:
+            batch_data /= 255
+
+        # ----return value process
+        if to_process is True:
+
+            if return_ori_data:
+                if to_norm is True:
+                    batch_data_no_patch /= 255
+                return batch_data_no_patch, batch_data
+            else:
+                return batch_data
+        else:
+            return batch_data
+
+    def get_4D_data_create_mask(self, paths, output_shape, to_norm=True, to_rgb=True, to_process=False,
+                                dtype='float32'):
+        len_path = len(paths)
+        to_gray = False
+        key_list = ['rdm_shift', 'rdm_patch']
+
+        # ----create default np array
+        batch_dim = [len_path]
+        batch_dim.extend(output_shape)
+        if batch_dim[-1] == 1:
+            to_gray = True
+
+        batch_data = np.zeros(batch_dim, dtype=dtype)
+        batch_label = np.zeros(batch_dim[:-1], dtype=dtype)
+
+        # ----setting dict process
+        if to_process is True:
+            for key in key_list:
+                if self.p_dict.get(key):
+                    if key == 'rdm_shift':
+                        corner = np.random.randint(4, size=len_path)
+                    if key == 'rdm_patch':
+                        batch_data_no_patch = np.zeros_like(batch_data)
+                        margin_ratio = self.s_dict[key][0]
+                        patch_ratio = self.s_dict[key][1]
+                        size_min = self.s_dict[key][2]
+
+        # ----read images and do processing
+        for idx, path in enumerate(paths):
+            try:
+                img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), 1)
+            except:
+                img = None
+
+            if img is None:
+                msg = "read failed:".format(path)
+                say_sth(msg)
+            else:
+                label = None
+                if to_process is True:
+                    ori_h, ori_w, _ = img.shape
+                    if self.p_dict.get('ave_filter'):
+                        img = cv2.blur(img, self.s_dict['ave_filter'])
+                    if self.p_dict.get('gau_filter'):
+                        img = cv2.GaussianBlur(img, self.s_dict['gau_filter'], 0, 0)
+                    if self.p_dict.get('rdm_shift'):
+                        c = corner[idx]
+                        y = np.random.randint(ori_h * self.s_dict['rdm_shift'])
+                        x = np.random.randint(ori_w * self.s_dict['rdm_shift'])
+                        p = int(round((y + x) / 2))
+                        # print("x={},y={},p={}".format(x,y,p))
+                        if c == 0:
+                            img = img[p:, p:, :]
+                        elif c == 1:
+                            img = img[p:, :-(p + 1), :]
+                        elif c == 2:
+                            img = img[:-(p + 1), p:, :]
+                        elif c == 3:
+                            img = img[:-(p + 1), :-(p + 1), :]
+                        else:
+                            img = img[p:, p:, :]
+                    if self.p_dict.get('rdm_br'):
+                        mean_br = np.mean(img)
+                        try:
+                            br_factor = np.random.randint(math.floor(mean_br * self.s_dict['rdm_br'][0]),
+                                                          math.ceil(mean_br * self.s_dict['rdm_br'][1]))
+                            img = np.clip(img / mean_br * br_factor, 0, 255)
+                            img = img.astype(np.uint8)
+                        except:
+                            msg = "Error:rdm_br value"
+                            say_sth(msg)
+                    if self.p_dict.get('rdm_flip'):
+                        flip_type = np.random.choice(self.s_dict['rdm_flip'])
+                        if flip_type != 2:
+                            img = cv2.flip(img, flip_type)
+                    if self.p_dict.get('rdm_blur'):
+                        kernel = tuple(np.random.choice(self.s_dict['rdm_blur'], size=2))
+                        # print("kernel:", kernel)
+                        if np.random.randint(0, 2) == 0:
+                            img = cv2.blur(img, kernel)
+                        else:
+                            img = cv2.GaussianBlur(img, kernel, 0, 0)
+                    if self.p_dict.get('rdm_noise'):
+                        uniform_noise = np.empty((img.shape[0], img.shape[1]), dtype=np.uint8)
+                        cv2.randu(uniform_noise, 0, 255)
+                        ret, impulse_noise = cv2.threshold(uniform_noise, 230, 255, cv2.THRESH_BINARY_INV)
+                        img = cv2.bitwise_and(img, img, mask=impulse_noise)
+                    if self.p_dict.get('rdm_angle'):
+                        angle = np.random.randint(self.s_dict['rdm_angle'][0], self.s_dict['rdm_angle'][1])
+                        h, w = img.shape[:2]
+                        M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
+                        img = cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+                    if self.p_dict.get('rdm_patch'):
+                        # ----put no patch image
+                        # img_no_patch = img.copy()
+                        img_no_patch = cv2.resize(img.copy(), (output_shape[1], output_shape[0]))
+                        img_no_patch = self.img_transform(img_no_patch, to_rgb=to_rgb, to_gray=to_gray)
+                        batch_data_no_patch[idx] = img_no_patch
+                        # ----
+                        maxi_len = int(sum(img.shape[:2]) / 2 * patch_ratio)
+                        patch_times = np.random.randint(1, 4)
+                        patch_types = np.random.randint(0, 4, patch_times)
+                        margin_x = margin_ratio * img.shape[1]
+                        margin_y = margin_ratio * img.shape[0]
+                        mean = np.mean(img)
+                        for patch_type in patch_types:
+                            center_x = np.random.randint(margin_x, img.shape[1] - margin_x)
+                            center_y = np.random.randint(margin_y, img.shape[0] - margin_y)
+                            # ----choose colors
+                            if mean > 127:
+                                color = np.random.randint(224, 255, 1).tolist() * 3
+                            else:
+                                color = np.random.randint(0, 32, 1).tolist() * 3
+
+                            # if np.random.randint(2) == 1:
+                            #     color = (0, 0, 0)
+                            # else:
+                            #     color = np.random.randint(0, 255, 3).tolist()
+                            if patch_type == 0:
+                                end_x = np.random.randint(size_min, maxi_len / 2)
+                                # end_y = np.random.randint(center_y,img.shape[0])
+                                cv2.rectangle(img, (center_x, center_y), (center_x + end_x, center_y + end_x), color,
+                                              -1)
+                                # print("square,center_x:{},center_y:{},len:{}".format(center_x, center_y, end_x))
+                            elif patch_type == 1:
+                                radius = np.random.randint(size_min, maxi_len / 2)
+                                cv2.circle(img, (center_x, center_y), radius, color, -1)
+                                # print("circle,center_x:{},center_y:{},radius:{}".format(center_x, center_y, radius))
+                            elif patch_type == 2:  # rectangle_1
+                                lens = np.random.randint(size_min, maxi_len / 2, 2)
+                                cv2.rectangle(img, (center_x, center_y), (center_x + lens[0], center_y + lens[1]),
+                                              color, -1)
+                                # print("rectangle,center_x:{},center_y:{},len:{}".format(center_x, center_y, lens))
+                            elif patch_type == 3:  # rectangle_2
+                                ave_size = sum(img.shape[:2]) / 2
+                                long_len = np.random.randint(ave_size // 2, ave_size * 0.9)
+                                short_len = np.random.randint(3, ave_size // 4)
+                                if center_x >= ave_size // 2:
+                                    if center_y >= ave_size // 2:
+                                        pass
+                                    else:
+                                        cv2.rectangle(img, (center_x, center_y),
+                                                      (center_x + short_len, center_y + long_len),
+                                                      color, -1)
+                                else:
+                                    if center_y >= ave_size // 2:
+                                        cv2.rectangle(img, (center_x, center_y),
+                                                      (center_x + long_len, center_y + short_len),
+                                                      color, -1)
+                                    else:
+                                        lens = [long_len, short_len]
+                                        np.random.shuffle(lens)
+                                        cv2.rectangle(img, (center_x, center_y),
+                                                      (center_x + lens[0], center_y + lens[1]),
+                                                      color, -1)
+                    if self.p_dict.get('rdm_perlin'):
+                        # img = cv2.resize(img, (output_shape[1], output_shape[0]))
+                        # mask,img_back = self.get_perlin_noise(output_shape[:-1],res=(16,16))
+                        # img = self.add_noise_by_perlin(img,self.rdm_perlin)
+                        img, label = self.add_noise_by_perlin_w_mask(img, self.rdm_perlin)
+
+                # ----image resize and change the color format
+                img = cv2.resize(img, (output_shape[1], output_shape[0]))
+
+                if to_gray is True:
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    img = np.expand_dims(img, axis=-1)
+                elif to_rgb is True:
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                batch_data[idx] = img
+
+                # ----label resize
+                if label is not None:
+                    label = cv2.resize(label, (output_shape[1], output_shape[0]))
+                    batch_label[idx] = label
+        # ----norm
+        batch_label /= 255
+        batch_label = batch_label.astype(np.uint8)
+        if to_norm is True:
+            batch_data /= 255
+
+        # ----return value process
+        return batch_data, batch_label
+
+    def get_seg_batch_data(self,paths):
+        re_img = []
+        re_label = []
+        for idx, path in enumerate(paths):
+            try:
+                img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), 1)
+            except:
+                img = None
+
+            if img is None:
+                msg = "read failed:".format(path)
+                say_sth(msg)
+            else:
+                ext = path.split(".")[-1]
+                json_path = path.strip(ext) + 'json'
+
+                # ----read the json file
+                if not os.path.exists(json_path):
+                    lbl = np.zeros(img.shape[:-1], dtype=np.uint8)
+                    json_exist = False
+                else:
+                    label_shapes = self.get_label_shapes(json_path)
+                    if label_shapes is None:
+                        continue
+                    try:
+                        lbl = self.shapes_to_label(
+                            img_shape=img.shape,
+                            shapes=label_shapes,
+                            label_name_to_value=self.class_name2id,
+                        )
+                    except:
+                        print("label Error:", json_path)
+
+                if len(self.transforms) > 0:
+                    for transform in self.transforms:
+                        img,lbl = transform(img=img,label=lbl)
+
+                re_img.append(img)
+                re_label.append(lbl)
+
+        return np.array(re_img), np.array(re_label)
+
+    def img_transform(self, img, to_rgb=True, to_gray=False):
+        if to_gray is True:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = np.expand_dims(img, axis=-1)
+        elif to_rgb is True:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        return img
+
+    def add_noise_by_perlin(self, img, set_dict):
+        # img format: BGR
+        # size format = [H,W]
+        size = img.shape[:2]
+        pixel_range = set_dict['pixel_range']
+        defect_num = set_dict['defect_num']
+        img_nature = np.fromfile(np.random.choice(set_dict['paths_color']), dtype=np.uint8)
+        img_nature = cv2.imdecode(img_nature, 1)  # BGR format
+        img_nature = cv2.resize(img_nature, size[::-1])
+
+        img_perlin = np.fromfile(np.random.choice(set_dict['paths_noise']), dtype=np.uint8)
+        img_perlin = cv2.imdecode(img_perlin, 0)
+        img_perlin = cv2.resize(img_perlin, size[::-1])
+
+        label_num, label_map, stats, centroids = cv2.connectedComponentsWithStats(img_perlin, connectivity=8)
+        pixel_num = stats.T[-1]
+        b = np.where(pixel_num >= pixel_range[0], pixel_num, pixel_range[1] + 3)
+        index_list = np.where(b < pixel_range[1])  # index_list就是符合pixel_range的index
+        zeros = np.zeros_like(img_perlin)
+        defect_num = np.minimum(len(index_list[0]), defect_num)
+        # print("實際可執行的defect_num:", defect_num)
+        # print("符合pixel_range的數量:", len(index_list[0]))
+        for idx in np.random.choice(index_list[0], defect_num, replace=False):
+            # print("idx:{},pixel num:{}".format(idx, pixel_num[idx]))
+
+            coors = np.where(label_map == idx)  # coors會是tuple，所以無法使用list extend取得所有座標
+            zeros[coors] = 255
+
+        defect = cv2.bitwise_and(img_nature, img_nature, mask=zeros)
+        img_lack = cv2.bitwise_and(img, img, mask=255 - zeros)
+
+        img_result = img_lack + defect
+        # plt.imshow(img_result[:,:,::-1])
+        # plt.show()
+
+        return img_result
+
+    def add_noise_by_perlin_w_mask(self, img, set_dict):
+        # img format: BGR
+        # size format = [H,W]
+        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        size = img_gray.shape
+        pixel_range = set_dict['pixel_range']
+        defect_num = set_dict['defect_num']
+        # img_nature = np.fromfile(np.random.choice(set_dict['paths_color']), dtype=np.uint8)
+        # img_nature = cv2.imdecode(img_nature, 1)#BGR format
+        # img_nature = cv2.resize(img_nature, size[::-1])
+
+        img_perlin = np.fromfile(np.random.choice(set_dict['paths_noise']), dtype=np.uint8)
+        img_perlin = cv2.imdecode(img_perlin, 0)
+        img_perlin = cv2.resize(img_perlin, size[::-1])
+
+        label_num, label_map, stats, centroids = cv2.connectedComponentsWithStats(img_perlin, connectivity=8)
+        pixel_num = stats.T[-1]
+        b = np.where(pixel_num >= pixel_range[0], pixel_num, pixel_range[1] + 3)
+        index_list = np.where(b < pixel_range[1])  # index_list就是符合pixel_range的index
+        zeros = np.zeros_like(img_perlin)
+        defect_num = np.minimum(len(index_list[0]), defect_num)
+        # print("實際可執行的defect_num:", defect_num)
+        # print("符合pixel_range的數量:", len(index_list[0]))
+        img_result = img_gray.copy()
+        for idx in np.random.choice(index_list[0], defect_num, replace=False):
+            # print("idx:{},pixel num:{}".format(idx, pixel_num[idx]))
+
+            coors = np.where(label_map == idx)  # coors會是tuple，所以無法使用list extend取得所有座標
+            pixel_list = img_gray[coors]
+            img_result[coors] = 255 - pixel_list
+            zeros[coors] = 255
+
+        # defect = cv2.bitwise_and(img_nature, img_nature, mask=zeros)
+        # img_result = cv2.bitwise_and(img,img,mask=255-zeros)
+        # img_lack = cv2.bitwise_and(img, img, mask=255 - zeros)
+
+        img_result = cv2.cvtColor(img_result, cv2.COLOR_GRAY2BGR)
+
+        # ----display
+        to_show = False
+        if to_show:
+            plt.figure(num=1, figsize=(10, 10))
+            plt.subplot(1, 2, 1)
+            plt.imshow(img_result[:, :, ::-1])
+            plt.subplot(1, 2, 2)
+            plt.imshow(zeros, cmap='gray')
+            plt.show()
+
+        return img_result, zeros
+
+    def combine_img_label(self,img,label):
+        re_img = img.copy()
+        for cls_num in np.unique(label):
+            if cls_num > 0:
+                coors = np.where(label == cls_num)
+                color = self.id2color[cls_num]
+                re_img[coors] = color
+        return re_img
+
+    def get_classname_id_color(self,source, print_out=False):
+        class_names = []
+        class_name2id = dict()
+        id2class_name = dict()
+        id2color = dict()
+        msg_list = []
+        status = 0
+
+        if isinstance(source, dict):
+            status = 1
+        elif isinstance(source, list):
+            source_list = source
+            status = 2
+        else:
+            source_list = [source]
+            status = 2
+
+        if status > 0:
+            colormap = imgviz.label_colormap()
+
+        if status == 1:
+            id2class_name = source.copy()
+            for class_id, class_name in source.items():
+                class_names.append(class_name)
+                class_name2id[class_name] = class_id
+                id2color[class_id] = colormap[class_id].tolist()
+        elif status == 2:
+            label_path = None
+            for source in source_list:
+                if os.path.isdir(source):
+                    label_path = os.path.join(source, 'classnames.txt')
+                elif os.path.isfile(source):
+                    label_path = source
+
+                if os.path.exists(label_path):
+                    break
+                else:
+                    label_path = None
+
+            if label_path is None:
+                say_sth("找不到任何類別資料的檔案")
+            else:
+
+                for i, line in enumerate(open(label_path).readlines()):
+                    class_id = i - 1  # starts with -1
+                    class_name = line.strip()
+
+                    if class_id == -1:
+                        assert class_name == "__ignore__"
+                        continue
+                    elif class_id == 0:
+                        assert class_name == "_background_"
+                        # continue
+                    class_names.append(class_name)
+                    class_name2id[class_name] = class_id
+
+                for key, value in class_name2id.items():
+                    id2class_name[value] = key
+                    id2color[value] = colormap[value].tolist()
+
+        if len(class_names) > 0:
+            msg_list.append("class_names:{}".format(class_names))
+            msg_list.append("class_name_to_id:{}".format(class_name2id))
+            for key, value in class_name2id.items():
+                msg_list.append("class name:{}, id:{}, color:{}".format(key, value, id2color[value]))
+
+            for msg in msg_list:
+                say_sth(msg, print_out=print_out)
+
+            self.class_names = class_names
+            self.class_name2id = class_name2id
+            self.id2class_name = id2class_name
+            self.id2color = id2color
+
+class RandomPerlin():
+    def __init__(self,mode='nature',area_range=[30,1000],defect_num=5,pixel_range=[200,250],
+                 noise_img_dir=r".\perlin_noise",color_img_dir=r".\car",p=0.5):
+
+        paths_noise = [file.path for file in os.scandir(noise_img_dir) if file.name.split(".")[-1] == 'png']
+        qty_n = len(paths_noise)
+        msg = "Perlin noise image qty:{}".format(qty_n)
+        say_sth(msg, print_out=print_out)
+
+        if mode == 'nature':
+            paths_color = [file.path for file in os.scandir(color_img_dir) if
+                           file.name.split(".")[-1] in img_format]
+            qty_c = len(paths_color)
+            msg = "Color image qty:{}".format(qty_c)
+            say_sth(msg, print_out=print_out)
+            self.paths_color = paths_color
+
+        #----set local var to global
+        self.mode = mode
+        self.paths_noise = paths_noise
+        self.area_range = area_range
+        self.defect_num = defect_num
+        self.pixel_range = pixel_range
+        self.p = p
+
+    def __call__(self, *args, **kwargs):
+        img = kwargs.get('img')
+        if np.random.random() >= (1 - self.p):
+            size = img.shape[:2]
+            # pixel_range = set_dict['pixel_range']
+            # defect_num = set_dict['defect_num']
+
+            img_perlin = np.fromfile(np.random.choice(self.paths_noise), dtype=np.uint8)
+            img_perlin = cv2.imdecode(img_perlin, 0)
+            img_perlin = cv2.resize(img_perlin, size[::-1])
+
+            if self.mode == 'nature':
+                img_nature = np.fromfile(np.random.choice(self.paths_color), dtype=np.uint8)
+                img_nature = cv2.imdecode(img_nature, 1)  # BGR format
+                img_nature = cv2.resize(img_nature, size[::-1])
+            else:
+                a = np.random.randint(self.pixel_range[0], high=self.pixel_range[1], size=size, dtype=np.uint8)
+                img_nature = np.stack([a, a, a], axis=-1)
+
+            label_num, label_map, stats, centroids = cv2.connectedComponentsWithStats(img_perlin, connectivity=8)
+            areas = stats.T[-1]
+            b = np.where(areas >= self.area_range[0], areas, self.area_range[1] + 3)
+            index_list = np.where(b < self.area_range[1])  # index_list就是符合pixel_range的index
+            zeros = np.zeros_like(img_perlin)
+            defect_num = np.minimum(len(index_list[0]), self.defect_num)
+            # print("實際可執行的defect_num:", defect_num)
+            # print("符合pixel_range的數量:", len(index_list[0]))
+            for idx in np.random.choice(index_list[0], defect_num, replace=False):
+                coors = np.where(label_map == idx)  # coors會是tuple，所以無法使用list extend取得所有座標
+                zeros[coors] = 255
+
+            defect = cv2.bitwise_and(img_nature, img_nature, mask=zeros)
+            img_lack = cv2.bitwise_and(img, img, mask=255 - zeros)
+
+            img_result = img_lack + defect
+            # plt.imshow(img_result[:,:,::-1])
+            # plt.show()
+
+            return img_result
+        else:
+            return img
+
+class RandomLightDefect():
+    def __init__(self,area_range=[30,1000],defect_num=5,pixel_range=[200,250],
+                 noise_img_dir=r".\perlin_noise",zoom_in=0,p=0.5,label_class=1):
+
+        paths_noise = [file.path for file in os.scandir(noise_img_dir) if file.name.split(".")[-1] == 'png']
+        qty_n = len(paths_noise)
+        msg = "Perlin noise image qty:{}".format(qty_n)
+        say_sth(msg, print_out=print_out)
+
+        #----set local var to global
+        self.paths_noise = paths_noise
+        self.area_range = area_range
+        self.defect_num = defect_num
+        self.pixel_range = pixel_range
+        self.zoom_in = zoom_in
+        self.p = p
+        self.label_class = label_class
+
+    def __call__(self, *args, **kwargs):
+        img = kwargs.get('img')
+        label = kwargs.get('label')
+
+        if np.random.random() >= (1 - self.p):
+            size = img.shape[:2]
+
+            img_perlin = np.fromfile(np.random.choice(self.paths_noise), dtype=np.uint8)
+            img_perlin = cv2.imdecode(img_perlin, 0)
+            img_perlin = cv2.resize(img_perlin, size[::-1])
+
+            #----zoom in
+            if self.zoom_in > 0:
+                zeros = np.zeros_like(img_perlin)
+                v = self.zoom_in
+                zeros[v:-v,v:-v] = img_perlin[v:-v,v:-v]
+                img_perlin = zeros.copy()
+                # plt.imshow(img_perlin,cmap='gray')
+                # plt.show()
+
+            a = np.random.randint(self.pixel_range[0], high=self.pixel_range[1], size=size, dtype=np.uint8)
+            img_light_defect = np.stack([a, a, a], axis=-1)
+
+
+            label_num, label_map, stats, centroids = cv2.connectedComponentsWithStats(img_perlin, connectivity=8)
+            areas = stats.T[-1]
+            b = np.where(areas >= self.area_range[0], areas, self.area_range[1] + 3)
+            index_list = np.where(b < self.area_range[1])  # index_list就是符合pixel_range的index
+            zeros = np.zeros_like(img_perlin)
+            defect_num = np.minimum(len(index_list[0]), self.defect_num)
+            # print("實際可執行的defect_num:", defect_num)
+            # print("符合pixel_range的數量:", len(index_list[0]))
+            for idx in np.random.choice(index_list[0], defect_num, replace=False):
+                coors = np.where(label_map == idx)  # coors會是tuple，所以無法使用list extend取得所有座標
+                zeros[coors] = 255
+                if label is not None:
+                    label[coors] = self.label_class
+
+            defect = cv2.bitwise_and(img_light_defect, img_light_defect, mask=zeros)
+
+            #----test if the substration > 0
+            img_parts = cv2.bitwise_and(img, img, mask=zeros)
+            subs = img_parts.astype(np.int16) - defect.astype(np.int16)
+            coors = np.where(subs < 0)
+            if len(coors[0]) > 0:
+                subtract = False
+            else:
+                subtract = True
+            # print("subtract:",subtract)
+            img = img.astype(np.uint16)
+            if subtract:
+                if np.random.random() >= 0.4:
+                    img = img - defect
+                    # print("subtract")
+                else:
+                    img = img + defect
+                    # print("add")
+            else:
+                img = img + defect
+
+            img = np.clip(img,0,255)
+            img = img.astype(np.uint8)
+            # plt.imshow(img[:,:,::-1])
+            # plt.show()
+
+
+        if label is None:
+            return img
+        else:
+            return img,label
+
 class tf_utility(tools):
     def __init__(self):
         super().__init__()
@@ -2062,252 +3640,728 @@ class tf_utility(tools):
 
         return re_img
 
-class DataLoader():
-    def __init__(self,paths,batch_size=32,shuffle=True,labels=None):
+class DataLoader4Seg():
+    def __init__(self,paths,batch_size=32,pipelines=None,shuffle=True):
         qty = len(paths)
         ites = math.ceil(qty / batch_size)
         if isinstance(paths,np.ndarray) is False:
             paths = np.array(paths)
-        if labels is not None:
-            if isinstance(labels, np.ndarray) is False:
-                labels = np.array(labels)
+        # if labels is not None:
+        #     if isinstance(labels, np.ndarray) is False:
+        #         labels = np.array(labels)
         self.qty = qty
         self.batch_size = batch_size
         self.paths = paths
-        self.labels = labels
         self.iterations = ites
-        self.ite_num = 0
-
+        self.ite_num = -1
+        self.shape_keys = [
+            "label",
+            "points",
+            "group_id",
+            "shape_type",
+            "flags",
+        ]
+        self.transforms = self.pipeline2transform(pipelines)
         if shuffle:
             self.shuffle()
+
     def shuffle(self):
         indices = np.random.permutation(self.qty)
         self.paths = self.paths[indices]
-        if self.labels is not None:
-            self.labels = self.labels[indices]
+
+    def pipeline2transform(self, pipelines):
+        transforms = []
+        if isinstance(pipelines,list):
+            process_name_list = list(process_dict.keys())
+            for pipeline in pipelines:
+                if pipeline.get('type') in process_name_list:
+                    process_name = pipeline['type']
+                    param_dict = dict()
+                    for key, value in pipeline.items():
+                        if key != 'type':
+                            param_dict[key] = value
+
+                    transforms.append(process_dict[process_name](**param_dict))
+
+        return transforms
+
+    def get_batch_data(self,paths):
+        re_img = []
+        re_label = []
+        for idx, path in enumerate(paths):
+            try:
+                img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), 1)
+            except:
+                img = None
+
+            if img is None:
+                msg = "read failed:".format(path)
+                say_sth(msg)
+            else:
+                ext = path.split(".")[-1]
+                json_path = path.strip(ext) + 'json'
+
+                # ----read the json file
+                if not os.path.exists(json_path):
+                    lbl = np.zeros(img.shape[:-1], dtype=np.uint8)
+                    json_exist = False
+                else:
+                    label_shapes = self.get_label_shapes(json_path)
+                    if label_shapes is None:
+                        continue
+                    try:
+                        lbl = self.shapes_to_label(
+                            img_shape=img.shape,
+                            shapes=label_shapes,
+                            label_name_to_value=self.class_name2id,
+                        )
+                    except:
+                        print("label Error:", json_path)
+
+                if len(self.transforms) > 0:
+                    for transform in self.transforms:
+                        img,lbl = transform(img=img,label=lbl)
+
+                re_img.append(img)
+                re_label.append(lbl)
+
+        return np.array(re_img), np.array(re_label)
+
+    def get_label_shapes(self, json_path):
+
+        # keys = [
+        #     "version",
+        #     "imageData",
+        #     "imagePath",
+        #     "shapes",  # polygonal annotations
+        #     "flags",  # image level flags
+        #     "imageHeight",
+        #     "imageWidth",
+        # ]
+
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                shapes = [
+                    dict(
+                        label=s["label"],
+                        points=s["points"],
+                        shape_type=s.get("shape_type", "polygon"),
+                        flags=s.get("flags", {}),
+                        group_id=s.get("group_id"),
+                        other_data={
+                            k: v for k, v in s.items() if k not in self.shape_keys
+                        },
+                    )
+                    for s in data["shapes"]
+                ]
+            return shapes
+        except:
+            print("Warning: read failed {}".format(json_path))
+            return None
+
+    def shapes_to_label(self, img_shape, shapes, label_name_to_value):
+        dtype = np.uint8
+
+        # if len(label_name_to_value) > 128:
+        #     dtype = np.int16
+
+        cls = np.zeros(img_shape[:2], dtype=dtype)
+        # ins = np.zeros_like(cls)
+        # instances = []
+        for shape in shapes:
+            points = shape["points"]
+            label = shape["label"]
+            group_id = shape.get("group_id")
+            if group_id is None:
+                group_id = uuid.uuid1()
+            shape_type = shape.get("shape_type", None)
+
+            # cls_name = label
+            # instance = (cls_name, group_id)
+            #
+            # if instance not in instances:
+            #     instances.append(instance)
+            # ins_id = instances.index(instance) + 1
+            cls_id = label_name_to_value[label]
+
+            mask = self.shape_to_mask(img_shape[:2], points, shape_type)
+            cls[mask] = cls_id
+            # ins[mask] = ins_id
+
+        return cls
+
+    def shape_to_mask(self,img_shape, points, shape_type=None, line_width=10, point_size=5):
+        mask = np.zeros(img_shape[:2], dtype=np.uint8)
+        mask = PIL.Image.fromarray(mask)
+        draw = PIL.ImageDraw.Draw(mask)
+        xy = [tuple(point) for point in points]
+        if shape_type == "circle":
+            assert len(xy) == 2, "Shape of shape_type=circle must have 2 points"
+            (cx, cy), (px, py) = xy
+            d = math.sqrt((cx - px) ** 2 + (cy - py) ** 2)
+            draw.ellipse([cx - d, cy - d, cx + d, cy + d], outline=1, fill=1)
+        elif shape_type == "rectangle":
+            assert len(xy) == 2, "Shape of shape_type=rectangle must have 2 points"
+            draw.rectangle(xy, outline=1, fill=1)
+        elif shape_type == "line":
+            assert len(xy) == 2, "Shape of shape_type=line must have 2 points"
+            draw.line(xy=xy, fill=1, width=line_width)
+        elif shape_type == "linestrip":
+            draw.line(xy=xy, fill=1, width=line_width)
+        elif shape_type == "point":
+            assert len(xy) == 1, "Shape of shape_type=point must have 1 points"
+            cx, cy = xy[0]
+            r = point_size
+            draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=1, fill=1)
+        else:
+            assert len(xy) > 2, "Polygon must have points more than 2"
+            draw.polygon(xy=xy, outline=1, fill=1)
+        mask = np.array(mask, dtype=bool)
+        return mask
+
+    def get_classname_id_color(self,source, print_out=False):
+        class_names = []
+        class_name2id = dict()
+        id2class_name = dict()
+        id2color = dict()
+        msg_list = []
+        status = 0
+
+        if isinstance(source, dict):
+            status = 1
+        elif isinstance(source, list):
+            source_list = source
+            status = 2
+        else:
+            source_list = [source]
+            status = 2
+
+        if status > 0:
+            colormap = imgviz.label_colormap()
+
+        if status == 1:
+            id2class_name = source.copy()
+            for class_id, class_name in source.items():
+                class_names.append(class_name)
+                class_name2id[class_name] = class_id
+                id2color[class_id] = colormap[class_id].tolist()
+        elif status == 2:
+            label_path = None
+            for source in source_list:
+                if os.path.isdir(source):
+                    label_path = os.path.join(source, 'classnames.txt')
+                elif os.path.isfile(source):
+                    label_path = source
+
+                if os.path.exists(label_path):
+                    break
+                else:
+                    label_path = None
+
+            if label_path is None:
+                say_sth("找不到任何類別資料的檔案")
+            else:
+
+                for i, line in enumerate(open(label_path).readlines()):
+                    class_id = i - 1  # starts with -1
+                    class_name = line.strip()
+
+                    if class_id == -1:
+                        assert class_name == "__ignore__"
+                        continue
+                    elif class_id == 0:
+                        assert class_name == "_background_"
+                        # continue
+                    class_names.append(class_name)
+                    class_name2id[class_name] = class_id
+
+                for key, value in class_name2id.items():
+                    id2class_name[value] = key
+                    id2color[value] = colormap[value].tolist()
+
+        if len(class_names) > 0:
+            msg_list.append("class_names:{}".format(class_names))
+            msg_list.append("class_name_to_id:{}".format(class_name2id))
+            for key, value in class_name2id.items():
+                msg_list.append("class name:{}, id:{}, color:{}".format(key, value, id2color[value]))
+
+            for msg in msg_list:
+                say_sth(msg, print_out=print_out)
+
+            self.class_names = class_names
+            self.class_name2id = class_name2id
+            self.id2class_name = id2class_name
+            self.id2color = id2color
+
+    def combine_img_label(self,img,label):
+        re_img = img.copy()
+        for cls_num in np.unique(label):
+            if cls_num > 0:
+                coors = np.where(label == cls_num)
+                color = self.id2color[cls_num]
+                re_img[coors] = color
+        return re_img
+
     def __next__(self):
-        num_start = self.batch_size * self.ite_num
-        num_end = np.minimum(num_start + self.batch_size, self.qty)
         self.ite_num += 1
-
-        if self.labels is not None:
-            return self.paths[num_start:num_end], self.labels[num_start:num_end]
+        if self.ite_num >= self.iterations:
+            raise StopIteration
         else:
-            return self.paths[num_start:num_end]
+            num_start = self.batch_size * self.ite_num
+            num_end = np.minimum(num_start + self.batch_size, self.qty)
 
-class RandomBrightnessContrast():
-    def __init__(self,br_ratio=0.05,ct_ratio=0.1,p=0.5):
-        self.br_ratio=br_ratio
-        self.ct_ratio=ct_ratio
-        self.p=p
-    def __call__(self, *args, **kwargs):
-        img = kwargs.get('img')
-        label = kwargs.get('label')
+            paths = self.paths[num_start:num_end]
+            imgs,labels = self.get_batch_data(paths)
 
-        rdm_list = np.random.random(size=3)
+            # return self.paths[num_start:num_end]
 
-        if rdm_list[0] >= (1 - self.p):
-            br_ratio = self.br_ratio * rdm_list[1]
-            ct_ratio = self.ct_ratio * rdm_list[2]
-            ct_ratio *= 47
-            ct_ratio += 1.0
-            # print("br ratio:{}, ct ratio:{}".format(br_ratio,ct_ratio))
-            ave_pixel = np.mean(img)
-            img = (img - ave_pixel * (1 - br_ratio)) * ct_ratio + ave_pixel * (1 + br_ratio)
+            return paths,imgs,labels
 
-            img = np.clip(img, 0, 255)
-            img = img.astype(np.uint8)
-        # else:
-        #     print("no process")
+    # def __call__(self, *args, **kwargs):
+    #     paths = self.__next__()
+    #
+    #     return self.get_batch_data(paths)
 
-        if label is None:
-            return img
+    def __iter__(self):
+        return self
+
+class ExtractSegDefect():
+    def __init__(self,id2classname_path):
+        self.shape_keys = [
+            "label",
+            "points",
+            "group_id",
+            "shape_type",
+            "flags",
+        ]
+
+        self.get_classname_id_color(id2classname_path)
+
+    def defect_analysis(self,img_source,img_ext='png'):
+        #----var
+        pixel_qty = []
+        pixel_value = []
+        height_value = []
+        width_value = []
+        hwRatio_value = []
+        diff_value = []
+
+        show_y = 2
+        show_x = 2
+
+        paths,path_qty = self.get_paths(img_source,img_ext=img_ext)
+        if path_qty == 0:
+            print(f"沒有符合{img_ext}的圖片進行分析")
         else:
-            return img,label
+            print(f"總共有{path_qty}張圖片進行分析")
+            for path in paths:
+                img = np.fromfile(path,dtype=np.uint8)
+                img = cv2.imdecode(img,-1)
+                img_bgr = img[:,:,:-1]
+                img_gray = cv2.cvtColor(img_bgr,cv2.COLOR_BGR2GRAY)
+                mask = img[:,:,-1]
 
-class RandomBlur():
-    def __init__(self,p=0.5):
-        self.p=p
-        self.kernel_list = [3,3,5,5,7,3,3,5,5,7]
-    def __call__(self, *args, **kwargs):
-        img = kwargs.get('img')
-        label = kwargs.get('label')
+                #----pixel qty
+                coors = np.where(mask == 255)
+                pixel_qty.append(len(coors[0]))
+                # pixel_qty.append(np.count_nonzero(mask))
 
-        if np.random.random() >= (1 - self.p):
-            kernel = tuple(np.random.choice(self.kernel_list, size=2))
-            # print("kernel:", kernel)
-            if np.random.randint(0, 2) == 0:
-                img = cv2.blur(img, kernel)
+                #----pixel value
+                pixel_value.extend(img_gray[coors])
+
+                #----height value
+                # height_value.append(img.shape[0])
+
+                #----width value
+                # width_value.append(img.shape[1])
+
+                #----height width ratio value
+                hwRatio_value.append(img.shape[0] / img.shape[1])
+
+                #----pixel difference between defect and background
+                coors_b = np.where(mask == 0)
+                defect_area = img_gray[coors]
+                backg_area = img_gray[coors_b]
+                if len(backg_area) > 0:
+                    diff = np.abs(defect_area.mean() - backg_area.mean())
+                    diff_value.append(int(diff))
+                else:
+                    print(f"Warning! The defect doesn't have background pixels.\nThe path: {path}")
+
+
+
+                #----
+
+        # ----pixel qty analysis
+        qty_list = self.get_unique_qty(pixel_qty)
+
+        # ----pixel value analysis
+        value_qty_list = self.get_unique_qty(pixel_value)
+
+        #----height value analysis
+        # height_qty_list = self.get_unique_qty(height_value)
+
+        #----width value analysis
+        # width_qty_list = self.get_unique_qty(width_value)
+
+        #----pixel difference between defect and background
+        diff_qty_list = self.get_unique_qty(diff_value)
+
+
+        ratio_qty_list = self.get_unique_qty(hwRatio_value)
+
+        #----plots display
+        plt.figure(figsize=(15,15))
+
+        plt.subplot(show_y,show_x,1)
+        plt.plot(np.unique(pixel_qty),qty_list)
+        plt.title("Pixel qty histogram")
+        plt.xlabel("Pixel qty")
+        plt.ylabel("Image qty")
+
+        plt.subplot(show_y, show_x, 2)
+        plt.plot(np.unique(pixel_value), value_qty_list)
+        plt.title("Gray scale histogram")
+        plt.xlabel("pixel value")
+        plt.ylabel("Qty")
+
+        plt.subplot(show_y, show_x, 3)
+        plt.plot(np.unique(hwRatio_value), ratio_qty_list)
+        # plt.plot(np.unique(height_value), height_qty_list,label='Height')
+        # plt.plot(np.unique(width_value), width_qty_list,label='Width')
+        plt.title("Height/width  ratio qty histogram")
+        plt.xlabel("value")
+        plt.ylabel("Qty")
+        # plt.legend()
+
+        # plt.subplot(show_y, show_x, 4)
+        # plt.plot(np.unique(width_value), width_qty_list)
+        # plt.title("Width qty histogram")
+        # plt.xlabel("Width value")
+        # plt.ylabel("Qty")
+
+        plt.subplot(show_y, show_x, 4)
+        plt.plot(np.unique(diff_value), diff_qty_list)
+        plt.title("Diff qty histogram")
+        plt.xlabel("Mean diff value")
+        plt.ylabel("Qty")
+
+        plt.show()
+
+    def get_unique_qty(self,value_list):
+        qty_list = []
+        for idx in np.unique(value_list):
+            coors = np.where(value_list == idx)
+            qty_list.append(len(coors[0]))
+
+        return qty_list
+
+
+    def defect_crop2png(self,img_dir,save_dir=None,to_classify=False):
+        show_num = 2
+        dir_list = []
+
+        paths = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in img_format]
+        qty = len(paths)
+
+        if qty > 0:
+            if save_dir is None:
+                # save_dir = os.path.join(os.path.dirname(img_dir), 'crop2png')
+                save_dir = os.path.join(img_dir, 'defectCrop2png')
+                dir_list.append(save_dir)
+
+            if to_classify:
+                for dirname in self.class_names:
+                    if dirname.find('background') >= 0:
+                        pass
+                    else:
+                        sub_dir = os.path.join(save_dir,dirname)
+                        dir_list.append(sub_dir)
+
+            for dir_path in dir_list:
+                if not os.path.exists(dir_path):
+                    os.makedirs(dir_path)
+
+
+            for path in paths:
+                ext = path.split(".")[-1]
+                json_path = path.strip(ext) + 'json'
+                if not os.path.exists(json_path):
+                    print("JSON path doesn't exist:{}".format(json_path))
+                else:
+                    try:
+                        img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), 1)
+                    except:
+                        img = None
+
+                    if img is None:
+                        msg = "read failed:".format(path)
+                        say_sth(msg)
+                    else:
+                        label_shapes = self.get_label_shapes(json_path)
+                        if label_shapes is None:
+                            continue
+                        # try:
+                        lbl = self.shapes_to_label(
+                            img_shape=img.shape,
+                            shapes=label_shapes,
+                            label_name_to_value=self.class_name2id,
+                        )
+
+                        #----cc
+                        cc_max_num, label_map, stats, centroids = cv2.connectedComponentsWithStats(lbl, connectivity=8)
+                        print("{} defects in {}".format(cc_max_num-1,path))
+                        for cc_num in range(1,cc_max_num):# label 0就是背景，如果不要背景，range可以從1開始
+                                #----get the label class
+                                coors = np.where(label_map == cc_num)
+                                y = coors[0][0]
+                                x = coors[1][0]
+                                label_class = lbl[y, x]
+                                pixel_qty = len(coors[0])
+
+                                print(" label_class:{}".format(self.id2class_name[label_class]))
+
+
+                                #----get the roi
+                                s = stats[cc_num]
+                                # backg_qty = s[2] * s[3] - s[-1]
+                                # print("pixel qty:{}, background qty:{}".format(s[-1],backg_qty))
+                                roi = img[s[1]:s[1]+s[3], s[0]:s[0]+s[2],:]
+                                lbl_roi = label_map[s[1]:s[1]+s[3], s[0]:s[0]+s[2]]
+                                lbl_roi = np.where(lbl_roi == cc_num, 255, 0).astype(np.uint8)
+                                # print(roi.shape)
+                                # print(lbl_roi.dtype)
+
+                                #----statistics
+                                # roi_gray = cv2.cvtColor(roi,cv2.COLOR_BGR2GRAY)
+                                # # roi_gray += 8
+                                # coors_roi = np.where(lbl_roi == 255)
+                                # max_v, min_v,ave_v,std_v = self.get_data_stat(roi_gray[coors_roi])
+                                # print("defect area:\nmax_v:{},min_v:{},ave_v:{},std_v:{}".format(max_v,min_v,ave_v,std_v))
+                                #
+                                # coors_b = np.where((255-lbl_roi) == 255)
+                                # roi_backg_gray = roi_gray[coors_b]
+                                # max_v, min_v, ave_v, std_v = self.get_data_stat(roi_backg_gray)
+                                # print("background area:\nmax_v:{},min_v:{},ave_v:{},std_v:{}".format(max_v, min_v, ave_v, std_v))
+                                #
+                                # plt.subplot(1,show_num,1)
+                                # plt.imshow(roi[:,:,::-1])
+                                # plt.subplot(1,show_num,2)
+                                # plt.imshow(lbl_roi,cmap='gray')
+                                # plt.show()
+
+                                img_png = np.concatenate((roi, np.expand_dims(lbl_roi, axis=-1)), axis=-1)
+                                save_path = path.split("\\")[-1].split(".")[0] + f"_crop{cc_num}"
+                                save_path += '.png'
+                                if to_classify:
+                                    save_path = os.path.join(save_dir,self.id2class_name[label_class], save_path)
+                                else:
+                                    save_path = os.path.join(save_dir, save_path)
+                                # print("save_path:",save_path)
+                                cv2.imencode('.png', img_png)[1].tofile(save_path)
+
+
+
+
+                        # except:
+                        #     print("label Error:", json_path)
+
+    def get_data_stat(self,roi):
+
+        return roi.max(),roi.min(),roi.mean(),roi.std()
+
+    def get_label_shapes(self, json_path):
+
+        # keys = [
+        #     "version",
+        #     "imageData",
+        #     "imagePath",
+        #     "shapes",  # polygonal annotations
+        #     "flags",  # image level flags
+        #     "imageHeight",
+        #     "imageWidth",
+        # ]
+
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                shapes = [
+                    dict(
+                        label=s["label"],
+                        points=s["points"],
+                        shape_type=s.get("shape_type", "polygon"),
+                        flags=s.get("flags", {}),
+                        group_id=s.get("group_id"),
+                        other_data={
+                            k: v for k, v in s.items() if k not in self.shape_keys
+                        },
+                    )
+                    for s in data["shapes"]
+                ]
+            return shapes
+        except:
+            print("Warning: read failed {}".format(json_path))
+            return None
+
+    def shapes_to_label(self, img_shape, shapes, label_name_to_value):
+        dtype = np.uint8
+
+        # if len(label_name_to_value) > 128:
+        #     dtype = np.int16
+
+        cls = np.zeros(img_shape[:2], dtype=dtype)
+        # ins = np.zeros_like(cls)
+        # instances = []
+        for shape in shapes:
+            points = shape["points"]
+            label = shape["label"]
+            group_id = shape.get("group_id")
+            if group_id is None:
+                group_id = uuid.uuid1()
+            shape_type = shape.get("shape_type", None)
+
+            # cls_name = label
+            # instance = (cls_name, group_id)
+            #
+            # if instance not in instances:
+            #     instances.append(instance)
+            # ins_id = instances.index(instance) + 1
+            cls_id = label_name_to_value[label]
+
+            mask = self.shape_to_mask(img_shape[:2], points, shape_type)
+            cls[mask] = cls_id
+            # ins[mask] = ins_id
+
+        return cls
+
+    def shape_to_mask(self,img_shape, points, shape_type=None, line_width=10, point_size=5):
+        mask = np.zeros(img_shape[:2], dtype=np.uint8)
+        mask = PIL.Image.fromarray(mask)
+        draw = PIL.ImageDraw.Draw(mask)
+        xy = [tuple(point) for point in points]
+        if shape_type == "circle":
+            assert len(xy) == 2, "Shape of shape_type=circle must have 2 points"
+            (cx, cy), (px, py) = xy
+            d = math.sqrt((cx - px) ** 2 + (cy - py) ** 2)
+            draw.ellipse([cx - d, cy - d, cx + d, cy + d], outline=1, fill=1)
+        elif shape_type == "rectangle":
+            assert len(xy) == 2, "Shape of shape_type=rectangle must have 2 points"
+            draw.rectangle(xy, outline=1, fill=1)
+        elif shape_type == "line":
+            assert len(xy) == 2, "Shape of shape_type=line must have 2 points"
+            draw.line(xy=xy, fill=1, width=line_width)
+        elif shape_type == "linestrip":
+            draw.line(xy=xy, fill=1, width=line_width)
+        elif shape_type == "point":
+            assert len(xy) == 1, "Shape of shape_type=point must have 1 points"
+            cx, cy = xy[0]
+            r = point_size
+            draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=1, fill=1)
+        else:
+            assert len(xy) > 2, "Polygon must have points more than 2"
+            draw.polygon(xy=xy, outline=1, fill=1)
+        mask = np.array(mask, dtype=bool)
+        return mask
+
+    def get_classname_id_color(self,source, print_out=False):
+        class_names = []
+        class_name2id = dict()
+        id2class_name = dict()
+        id2color = dict()
+        msg_list = []
+        status = 0
+
+        if isinstance(source, dict):
+            status = 1
+        elif isinstance(source, list):
+            source_list = source
+            status = 2
+        else:
+            source_list = [source]
+            status = 2
+
+        if status > 0:
+            colormap = imgviz.label_colormap()
+
+        if status == 1:
+            id2class_name = source.copy()
+            for class_id, class_name in source.items():
+                class_names.append(class_name)
+                class_name2id[class_name] = class_id
+                id2color[class_id] = colormap[class_id].tolist()
+        elif status == 2:
+            label_path = None
+            for source in source_list:
+                if os.path.isdir(source):
+                    label_path = os.path.join(source, 'classnames.txt')
+                elif os.path.isfile(source):
+                    label_path = source
+
+                if os.path.exists(label_path):
+                    break
+                else:
+                    label_path = None
+
+            if label_path is None:
+                say_sth("找不到任何類別資料的檔案")
             else:
-                img = cv2.GaussianBlur(img, kernel, 0, 0)
 
+                for i, line in enumerate(open(label_path).readlines()):
+                    class_id = i - 1  # starts with -1
+                    class_name = line.strip()
 
-        if label is None:
-            return img
+                    if class_id == -1:
+                        assert class_name == "__ignore__"
+                        continue
+                    elif class_id == 0:
+                        assert class_name == "_background_"
+                        # continue
+                    class_names.append(class_name)
+                    class_name2id[class_name] = class_id
+
+                for key, value in class_name2id.items():
+                    id2class_name[value] = key
+                    id2color[value] = colormap[value].tolist()
+
+        if len(class_names) > 0:
+            msg_list.append("class_names:{}".format(class_names))
+            msg_list.append("class_name_to_id:{}".format(class_name2id))
+            for key, value in class_name2id.items():
+                msg_list.append("class name:{}, id:{}, color:{}".format(key, value, id2color[value]))
+
+            for msg in msg_list:
+                say_sth(msg, print_out=print_out)
+
+            self.class_names = class_names
+            self.class_name2id = class_name2id
+            self.id2class_name = id2class_name
+            self.id2color = id2color
+
+    def get_paths(self,img_source,img_ext=None):
+        # ----var
+        paths = list()
+
+        #----
+        if not isinstance(img_source, list):
+            img_source = [img_source]
+
+        #----
+        if img_ext is None:
+            img_ext = img_format
         else:
-            return img,label
+            img_ext = [img_ext]
 
-class RandomHorizontalFlip():
-    def __init__(self,p=0.5):
-        self.p = p
-
-    def __call__(self, *args, **kwargs):
-        img = kwargs.get('img')
-        label = kwargs.get('label')
-
-        if np.random.random() >= (1 - self.p):
-            img = cv2.flip(img, 1)
-            if label is not None:
-                label = cv2.flip(label, 1)
-
-        if label is None:
-            return img
-        else:
-            return img,label
-
-class RandomVerticalFlip():
-    def __init__(self,p=0.5):
-        self.p = p
-
-    def __call__(self, *args, **kwargs):
-        img = kwargs.get('img')
-        label = kwargs.get('label')
-
-        if np.random.random() >= (1 - self.p):
-            img = cv2.flip(img, 0)
-            if label is not None:
-                label = cv2.flip(label, 0)
-
-        if label is None:
-            return img
-        else:
-            return img,label
-
-class Resize():
-    def __init__(self,size):
-        self.size = size #(height, width)
-
-    def __call__(self, *args, **kwargs):
-        img = kwargs.get('img')
-        label = kwargs.get('label')
-
-        img = cv2.resize(img, self.size[::-1])
-        if label is not None:
-            label = cv2.resize(label, self.size[::-1], interpolation=cv2.INTER_NEAREST)
-
-        if label is None:
-            return img
-        else:
-            return img,label
-
-class RandomCrop():
-    def __init__(self,size):
-        self.size=size#(h,w)
-
-    def __call__(self, *args, **kwargs):
-        img = kwargs.get('img')
-        label = kwargs.get('label')
-
-        h,w = img.shape[:2]
-        h_start = 0
-        w_start= 0
-        corner = np.random.randint(4)
-        if h > self.size[0]:
-            h_start = np.random.randint((h - self.size[0]))
-        if w > self.size[1]:
-            w_start = np.random.randint((w - self.size[1]))
-
-        img = self.cut(img,h_start,w_start,corner)
-        if label is not None:
-            label = self.cut(label, h_start, w_start, corner)
-
-        if label is None:
-            return img
-        else:
-            return img,label
-
-    def cut(self,data,h_s,w_s,corner):
-        if corner == 0:
-            data = data[h_s:, w_s:, :]
-        elif corner == 1:
-            data = data[h_s:, :-(w_s + 1), :]
-        elif corner == 2:
-            data = data[:-(h_s + 1), w_s:, :]
-        elif corner == 3:
-            data = data[:-(h_s + 1), :-(w_s + 1), :]
-        else:
-            data = data[h_s:, w_s:, :]
-
-
-        return data
-
-class RandomPerlin():
-    def __init__(self,mode='nature',area_range=[30,1000],defect_num=5,pixel_range=[200,250],
-                 noise_img_dir=r".\perlin_noise",color_img_dir=r".\car",p=0.5):
-
-        paths_noise = [file.path for file in os.scandir(noise_img_dir) if file.name.split(".")[-1] == 'png']
-        qty_n = len(paths_noise)
-        msg = "Perlin noise image qty:{}".format(qty_n)
-        say_sth(msg, print_out=print_out)
-
-        if mode == 'nature':
-            paths_color = [file.path for file in os.scandir(color_img_dir) if
-                           file.name.split(".")[-1] in img_format]
-            qty_c = len(paths_color)
-            msg = "Color image qty:{}".format(qty_c)
-            say_sth(msg, print_out=print_out)
-            self.paths_color = paths_color
-
-        #----set local var to global
-        self.mode = mode
-        self.paths_noise = paths_noise
-        self.area_range = area_range
-        self.defect_num = defect_num
-        self.pixel_range = pixel_range
-        self.p = p
-
-    def __call__(self, *args, **kwargs):
-        img = kwargs.get('img')
-        if np.random.random() >= (1 - self.p):
-            size = img.shape[:2]
-            # pixel_range = set_dict['pixel_range']
-            # defect_num = set_dict['defect_num']
-
-            img_perlin = np.fromfile(np.random.choice(self.paths_noise), dtype=np.uint8)
-            img_perlin = cv2.imdecode(img_perlin, 0)
-            img_perlin = cv2.resize(img_perlin, size[::-1])
-
-            if self.mode == 'nature':
-                img_nature = np.fromfile(np.random.choice(self.paths_color), dtype=np.uint8)
-                img_nature = cv2.imdecode(img_nature, 1)  # BGR format
-                img_nature = cv2.resize(img_nature, size[::-1])
+        for img_dir in img_source:
+            temp = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in img_ext]
+            if len(temp) == 0:
+                say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir))
             else:
-                a = np.random.randint(self.pixel_range[0], high=self.pixel_range[1], size=size, dtype=np.uint8)
-                img_nature = np.stack([a, a, a], axis=-1)
+                paths.extend(temp)
+
+        return np.array(paths),len(paths)
 
 
-            label_num, label_map, stats, centroids = cv2.connectedComponentsWithStats(img_perlin, connectivity=8)
-            areas = stats.T[-1]
-            b = np.where(areas >= self.area_range[0], areas, self.area_range[1] + 3)
-            index_list = np.where(b < self.area_range[1])  # index_list就是符合pixel_range的index
-            zeros = np.zeros_like(img_perlin)
-            defect_num = np.minimum(len(index_list[0]), self.defect_num)
-            # print("實際可執行的defect_num:", defect_num)
-            # print("符合pixel_range的數量:", len(index_list[0]))
-            for idx in np.random.choice(index_list[0], defect_num, replace=False):
-                coors = np.where(label_map == idx)  # coors會是tuple，所以無法使用list extend取得所有座標
-                zeros[coors] = 255
-
-            defect = cv2.bitwise_and(img_nature, img_nature, mask=zeros)
-            img_lack = cv2.bitwise_and(img, img, mask=255 - zeros)
-
-            img_result = img_lack + defect
-            # plt.imshow(img_result[:,:,::-1])
-            # plt.show()
-
-            return img_result
-        else:
-            return img
 
 
 def create_stack_img(img_list,margin=10):
@@ -2488,6 +4542,21 @@ def log_update(content,para_dict):
         content[key] = value
 
     return content
+
+def get_paths(img_source):
+    # ----var
+    paths = list()
+    if not isinstance(img_source, list):
+        img_source = [img_source]
+
+    for img_dir in img_source:
+        temp = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in img_format]
+        if len(temp) == 0:
+            say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir))
+        else:
+            paths.extend(temp)
+
+    return np.array(paths), len(paths)
 
 def get_label_dict(img_dir):
     #----var
@@ -3993,12 +6062,6 @@ def defect_qty_count(json_source):
     for key,value in class_qty_dict.items():
         print("{}:{}".format(key,value))
 
-
-
-
-
-
-
 class NormDense(tf.keras.layers.Layer):
 
     def __init__(self, feature_num, classes=1000, output_name=''):
@@ -4021,15 +6084,34 @@ class NormDense(tf.keras.layers.Layer):
 
 
 if __name__ == "__main__":
-    #----defect_qty_count
-    json_source = [
-        r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
-        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
-        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2",
-        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_矽電Label_Tidy_data\VRS_Json\train",
+    #----Extract Seg defects
+    # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2"
+    img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train"
+    id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
+    a = ExtractSegDefect(id2class_name)
+    a.defect_crop2png(img_dir,to_classify=True)
 
-    ]
-    defect_qty_count(json_source)
+    # defect_name = "particle"
+    # img_source = [
+    #     r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1\defectCrop2png\hole",
+    #     r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2\defectCrop2png\hole",
+    #     r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train\defectCrop2png\hole",
+    #     r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test\defectCrop2png\hole",
+    # ]
+    #
+    # a.defect_analysis(img_source)
+
+
+
+    #----defect_qty_count
+    # json_source = [
+    #     r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
+    #     r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
+    #     r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2",
+    #     r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_矽電Label_Tidy_data\VRS_Json\train",
+    #
+    # ]
+    # defect_qty_count(json_source)
 
 
     #----dataloader
@@ -4104,11 +6186,11 @@ if __name__ == "__main__":
     # img_mask(img_source, json_path,zoom_in_value=[75,77,88,88], img_type='path')
 
     #----check results
-    # dir_path = r"D:\code\model_saver\AE_Seg_145"
+    # dir_path = r"D:\code\model_saver\AE_Seg_148"
     # dir_path = r"C:\Users\User\Desktop\train_result"
     # dir_path = r"D:\code\model_saver\AE_Seg_139"
     # only2see = ['seg_test_defect_sensitivity_list']
-    # check_results(dir_path, encript_flag=False,epoch_range=None,only2see=None)
+    # check_results(dir_path, encript_flag=True,epoch_range=None,only2see=None)
 
     #----result comparison
     # result_dict = {
@@ -4161,51 +6243,156 @@ if __name__ == "__main__":
     # label_uniqueNum_check(json_dir,cls_name_path,resize,angle=angle)
 
     #----augmentation
-    # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\ok_parts_train"
+    # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220901_AOI判定OK\OK(多區OK)\num_100"
     # rdm_patch = [0.1, 0.1, 10]  # rdm_patch:[margin_ratio,patch_ratio,size_min]
-    # process_dict = {"rdm_flip": False, 'rdm_br_ct': False, 'rdm_blur': True,
-    #                           'rdm_angle': True, 'rdm_noise': False, 'rdm_shift': True,
-    #                           'rdm_patch': False, 'rdm_perlin': True
+    # process_dict = {"rdm_flip": False, 'rdm_br_ct': False, 'rdm_blur': False,
+    #                           'rdm_angle': False, 'rdm_noise': False, 'rdm_shift': False,
+    #                           'rdm_patch': False, 'rdm_perlin': True,'rdm_light_defect':True
     #                           }
+    #
     # setting_dict = {'rdm_shift': 0.05, 'rdm_angle': 3, 'rdm_patch': rdm_patch, 'rdm_br_ct':[0.05,0.05],
-    #                 'rdm_perlin':dict(mode='num_range',area_range=[30,500],defect_num=5,pixel_range=[210,250])
+    #                 'rdm_perlin':dict(mode='num_range',area_range=[30,500],defect_num=3,pixel_range=[210,250]),
+    #                 'rdm_light_defect':dict(area_range=[500, 1000], defect_num=3, pixel_range=[7, 12], zoom_in=60, p=1.0)
     #                                }
-    # show_num = 3
+    # show_num = 20
+    # special_process_list = ['rdm_patch', 'rdm_perlin', 'rdm_light_defect']
     # tl = tools(print_out=True)
     # paths,qty = tl.get_paths(img_dir)
     # tl.set_process(process_dict, setting_dict, print_out=print_out)
-    # # aug_data = tl.get_4D_data(np.random.choice(paths,show_num), [512, 832, 3],
-    # #                           to_norm=False,
-    # #                           to_rgb=True,
-    # #                           to_process=True,
-    # #                           )
+    # aug_data = tl.get_4D_data(np.random.choice(paths,show_num), [512, 832, 3],
+    #                           to_norm=False,
+    #                           to_rgb=True,
+    #                           to_process=True,
+    #                           )
     # aug_data,aug_label = tl.get_4D_img_label_data(np.random.choice(paths, show_num), [512, 832, 3],
     #                           to_norm=False,
     #                           to_rgb=True,
     #                           to_process=True,
     #                           )
-    # if process_dict.get('rdm_patch'):
+
+
+    # ----if return ori data or not
+    # return_ori_data = False
+    # for name in special_process_list:
+    #     if process_dict.get(name) is True:
+    #         return_ori_data = True
+    #         break
+    #
+    # if return_ori_data:
     #     aug_data = aug_data[1]
     # aug_data = aug_data.astype(np.uint8)
+    #----display
     # plt.figure(figsize=(10,10))
     # for i,img in enumerate(aug_data):
     #     plt.subplot(1,show_num,i+1)
     #     plt.imshow(img)
     # plt.show()
 
+    #----save
+    # save_dir = os.path.join(img_dir,'low_contrast')
+    # if not os.path.exists(save_dir):
+    #     os.makedirs(save_dir)
+    # for i,img in enumerate(aug_data):
+    #     save_path = os.path.join(save_dir,"n_{}.jpg".format(i))
+    #
+    #     cv2.imencode('.jpg', img[:,:,::-1])[1].tofile(save_path)
 
-    #----
-    # path = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\selected\-6_-37_MatchLightSet_Ng_1.jpg"
+
+
+    #----augmentation v2
+    # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220901_AOI判定OK\OK(多區OK)\num_100"
+    # id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
+    # # id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames_one_defect_class.txt"
+    # vividDefect_dict = dict(
+    #     defect_num=2, rotation_degrees=20, resize_ratio=20, lower_br_ratio=5,
+    #     ct_ratio=20, defect_png_dir=r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\defects_but_ok_20220922\crop2png",
+    #     zoom_in=[15, 15, 10, 10],  # [x_s,x_end,y_s,y_end]
+    #     margin=5, p=0.5, std_threshold=1, label_class=0, print_out=False
+    # )
+    # area_range = [100, 1000]
+    # zoom_in = 70
+    # p = 0.7
+    # pipelines = [
+    #     dict(type='CvtColor', to_rgb=True),
+    #     dict(type='RandomBlur', p=p),
+    #     dict(type='RandomBrightnessContrast', br_ratio=0.1, ct_ratio=0.3, p=p),
+    #     # dict(type='BrightnessContrast', br_ratio=0.0, ct_ratio=0.3),
+    #     # dict(type='RandomDefect', area_range=area_range, defect_num=3, pixel_range=[7, 12], zoom_in=zoom_in, p=p),
+    #     # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[50, 70], zoom_in=zoom_in, p=p),
+    #     # dict(type='RandomDefect', area_range=area_range, defect_num=3, pixel_range=[90, 120], zoom_in=zoom_in, p=p),
+    #     # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[140, 160], zoom_in=zoom_in, p=p),
+    #     # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[180, 200], zoom_in=zoom_in, p=p),
+    #     dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[200,250], zoom_in=zoom_in, p=p,label_class=0),
+    #     # dict(type='RandomPNoise', area_range=area_range, defect_num=3, zoom_in=zoom_in,p=p),
+    #     dict(type='RandomVividDefect',**vividDefect_dict),
+    #     # dict(type='RandomHorizontalFlip', p=p),
+    #     # dict(type='RandomVerticalFlip', p=p),
+    #     dict(type='RandomRotation',degrees=5,p=p),
+    #     dict(type='Resize', height=530,width=860),
+    #     # dict(type='Resize', height=512,width=832),
+    #     dict(type='RandomCrop', height=512,width=832),
+    #     # dict(type='Norm')
+    # ]
+    #
+    #
+    # show_num = 3
+    # # special_process_list = ['rdm_patch', 'rdm_perlin', 'rdm_light_defect']
+    # paths,qty = get_paths(img_dir)
+    # print("qty:",qty)
+    # dataloader = DataLoader4Seg(paths,batch_size=show_num,pipelines=pipelines,shuffle=True)
+    # # tl = tools_v2(pipelines=pipelines,print_out=True)
+    #
+    # dataloader.get_classname_id_color(id2class_name,print_out=True)
+    # # paths,qty = tl.get_paths(img_dir)
+    # # tl.set_process(process_dict, setting_dict, print_out=print_out)
+    # i = 0
+    # for batch_paths,imgs,labels in (dataloader):
+    #
+    #     print(i,imgs.shape)
+    #     i+=1
+    #     combine_data = []
+    #
+    #     for i in range(show_num):
+    #         combine_data.append(dataloader.combine_img_label(imgs[i],labels[i]))
+    #
+    #     #----display
+    #     plt.figure(figsize=(10,10))
+    #     for i in range(show_num):
+    #         plt.subplot(2, show_num, i + 1)
+    #         plt.imshow(imgs[i])
+    #         plt.subplot(2, show_num, i + 1 + show_num)
+    #         plt.imshow(combine_data[i])
+    #
+    #     # for i,img in enumerate(aug_data):
+    #     #     plt.subplot(1,show_num,i+1)
+    #     #     plt.imshow(img)
+    #     plt.show()
+    #     # break
+
+
+
+
+    #----New AUG(未正式啟用)
+    # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220829_AOI_NG\real_ans\OK"
+    # # path = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\selected\-6_-37_MatchLightSet_Ng_1.jpg"
+    #
+    # paths = [file.path for file in os.scandir(img_dir) for file.name.split(".")[-1] in img_format]
+    # path = np.random.choice(paths)
     # img = np.fromfile(path,dtype=np.uint8)
     # img = cv2.imdecode(img,1)
     # # rdm_br_ct = RandomBrightnessContrast(br_ratio=0.1,ct_ratio=0.1,p=0.5)
     # # img_p = rdm_br_ct(img=img)
     # # rdm_blur = RandomBlur(p=0.7)
     # # img_p = rdm_blur(img=img)
-    # resize = Resize(size=(563, 915))
-    # rdm = RandomCrop(size=(512,832))
-    # img_p = resize(img=img)
-    # img_p = rdm(img=img_p)
+    # # resize = Resize(size=(563, 915))
+    # # rdm = RandomCrop(size=(512,832))
+    # # img_p = resize(img=img)
+    # # img_p = rdm(img=img_p)
+    #
+    # light_defect_dict = dict(area_range=[500, 1000], defect_num=3, pixel_range=[7, 12],zoom_in=60,p=1.0)
+    # lightDefect = RandomLightDefect(**light_defect_dict)
+    # img_p = lightDefect(img=img)
+    #
     #
     # plt.subplot(1,2,1)
     # plt.imshow(img[:,:,::-1])
@@ -4214,6 +6401,21 @@ if __name__ == "__main__":
     # plt.imshow(img_p[:,:,::-1])
     #
     # plt.show()
+
+
+    #----tf read images
+    # path = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220901_AOI判定OK\OK(多區OK)\train\0_-16_MatchLightSet_NoFailRegion_Ok_1.jpg"
+    # path = tf.gfile.FastGFile(path,'rb').read()
+    # img = v2.image.decode_jpeg(path, channels=1)  # color images
+    # img = v2.image.resize(img, [512, 832])
+    # # img = v2.expand_dims(img,axis=0)
+    # print(img.shape)
+    # print(type(img))
+    # # img = v2.image.convert_image_dtype(img, tf.float32)
+    # with tf.Session() as sess:
+    #     img_sess = img.eval()
+    #     print(img_sess.shape)
+    #     print(type(img_sess))
 
 
 

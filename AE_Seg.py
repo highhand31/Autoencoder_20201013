@@ -13,13 +13,13 @@ else:
 print(tf.__version__)
 # sys.path.append(r'G:\我的雲端硬碟\Python\Code\Pycharm\utility')
 from Utility import tools,file_transfer,file_decode_v2,Seg_performance,get_classname_id_color,\
-    get_latest_json_content,dict_transform
+    get_latest_json_content,dict_transform,tools_v2
 
 
 from models_AE import AE_transpose_4layer,tf_mish,AE_JNet,AE_Resnet_Rot,AE_pooling_net,\
     AE_Unet,Seg_DifNet,AE_Seg_pooling_net,preprocess,AE_pooling_net_V3,AE_pooling_net_V4,Seg_DifNet_V2,\
     AE_pooling_net_V5,AE_dense_sampling,AE_pooling_net_V6,AE_pooling_net_V7,Seg_pooling_net_V4,Seg_pooling_net_V7,\
-    Seg_pooling_net_V8
+    Seg_pooling_net_V8,Seg_pooling_net_V9,AE_pooling_net_V8
 
 import config_mit
 from models_MiT import MixVisionTransformer,MiTDecoder
@@ -474,16 +474,24 @@ class AE_Seg():
 
 
         if self.to_train_ae:
+            special_process_list = ['rdm_patch', 'rdm_perlin', 'rdm_light_defect']
+            return_ori_data = False
+            #----if return ori data or not
+
+            for name in special_process_list:
+                if process_dict.get(name) is True:
+                    return_ori_data = True
+                    break
             #----random patch
-            rdm_patch = False
-            if process_dict.get('rdm_patch') is True:
-                rdm_patch = True
+            # rdm_patch = False
+            # if process_dict.get('rdm_patch') is True:
+            #     rdm_patch = True
 
             #----filer scaling process
             if scaler is not None:
                 filter_list = (np.array(filter_list) / scaler).astype(np.uint16)
 
-            if rdm_patch is True:
+            if return_ori_data is True:
                 self.tf_input_ori = tf.placeholder(dtype, shape=model_shape, name='input_ori')
 
             #tf_label_batch = tf.placeholder(dtype=tf.int32, shape=[None], name="label_batch")
@@ -497,14 +505,14 @@ class AE_Seg():
             #----preprocess
             if preprocess_dict is None:
                 tf_input_process = tf.identity(tf_input,name='preprocess')
-                if rdm_patch is True:
+                if return_ori_data is True:
                     tf_input_ori_no_patch = tf.identity(self.tf_input_ori, name='tf_input_ori_no_patch')
 
             else:
                 tf_temp = preprocess(tf_input, preprocess_dict, print_out=print_out)
                 tf_input_process = tf.identity(tf_temp,name='preprocess')
 
-                if rdm_patch is True:
+                if return_ori_data is True:
                     tf_temp_2 = preprocess(self.tf_input_ori, preprocess_dict, print_out=print_out)
                     tf_input_ori_no_patch = tf.identity(tf_temp_2, name='tf_input_ori_no_patch')
 
@@ -536,7 +544,6 @@ class AE_Seg():
                                     dropout_ratio=0, num_classes=3)
                 logits = mitDec(outs)
                 recon = tf.identity(logits, name='output_AE')
-
             elif infer_method == "AE_pooling_net_V3":
                 recon = AE_pooling_net_V3(tf_input_process, kernel_list, filter_list, activation=acti_func,
                                           pool_kernel_list=pool_kernel, pool_type_list=pool_type,
@@ -557,6 +564,12 @@ class AE_Seg():
             elif infer_method == "AE_pooling_net_V7":
 
                 recon = AE_pooling_net_V7(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
+                                         print_out=print_out)
+                recon = tf.identity(recon, name='output_AE')
+            elif infer_method == "AE_pooling_net_V8":
+
+                self.tf_input_standard = tf.placeholder(dtype, shape=model_shape, name='input_standard')
+                recon = AE_pooling_net_V8(tf_input_process,self.tf_input_standard,ae_var['encode_dict'],ae_var['decode_dict'],
                                          print_out=print_out)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_dense_sampling":
@@ -602,7 +615,7 @@ class AE_Seg():
             elif loss_method == 'ssim':
                 # self.loss_AE = tf.reduce_mean(tf.image.ssim_multiscale(tf.image.rgb_to_grayscale(self.tf_input),tf.image.rgb_to_grayscale(self.recon),2),name='loss')
 
-                if rdm_patch is True:
+                if return_ori_data is True:
                     loss_AE = tf.reduce_mean(tf.image.ssim(tf_input_ori_no_patch, recon, 2.0), name='loss_AE')
                 else:
                     loss_AE = tf.reduce_mean(tf.image.ssim(tf_input_process, recon, 2.0), name='loss_AE')
@@ -725,6 +738,14 @@ class AE_Seg():
                 softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
                 prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
+            elif infer_method4Seg == 'Seg_pooling_net_V9':
+                logits_Seg = Seg_pooling_net_V9(tf_input_process, tf_input_recon, seg_var['encode_dict'],
+                                                seg_var['decode_dict'],
+                                                to_reduce=seg_var.get('to_reduce'), out_channel=self.class_num,
+                                                print_out=print_out)
+                softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
+                prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
+                prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
             elif infer_method4Seg == 'AE_Seg_pooling_net':
                 logits_Seg = Seg_out
                 softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
@@ -830,6 +851,8 @@ class AE_Seg():
             self.out_dir_prefix = out_dir_prefix
             self.loss_method = loss_method
             self.pb4ae_save_path = pb4ae_save_path
+            self.return_ori_data = return_ori_data
+            self.infer_method = infer_method
 
         if self.to_train_seg is True:
             self.tf_label_batch = tf_label_batch
@@ -843,6 +866,7 @@ class AE_Seg():
             self.loss_method4Seg = loss_method4Seg
             self.pb4seg_save_path = pb4seg_save_path
             self.tf_dropout = tf_dropout
+            self.infer_method4Seg = infer_method4Seg
 
     def train(self,para_dict):
         # ----use previous settings
@@ -871,6 +895,8 @@ class AE_Seg():
             save_period = ae_var.get('save_period')
             target_dict = ae_var.get('target')
             pause_opt_ae = ae_var.get('pause_opt_ae')
+            img_standard_path = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220901_AOI判定OK\OK(多區OK)\train\0_-16_MatchLightSet_NoFailRegion_Ok_1.jpg"
+
 
         #----SEG
         if self.to_train_seg:
@@ -883,6 +909,8 @@ class AE_Seg():
             batch_size_seg = seg_var['batch_size']
             pause_opt_seg = seg_var.get('pause_opt_seg')
             self_create_label = seg_var.get('self_create_label')
+            train_with_aug_v2 = seg_var.get('train_with_aug_v2')
+
 
         #----special_img_dir
         if self.special_img_dir is not None:
@@ -950,6 +978,26 @@ class AE_Seg():
             tl_seg = tools()
             tl_seg.class_name2id = self.class_name2id
             tl_seg.id2color = self.id2color
+
+            #get seg ok paths for Aug vivid defect
+            if train_with_aug_v2:
+                ok_img_seg_dir = seg_var.get('ok_img_seg_dir')
+                if ok_img_seg_dir is None:
+                    train_with_aug_v2 = False
+                else:
+                    ok_img_seg_paths,ok_img_seg_qty = tl_seg.get_paths(ok_img_seg_dir)
+                    if ok_img_seg_qty == 0:
+                        train_with_aug_v2 = False
+
+
+            if self_create_label or train_with_aug_v2:
+                tl_seg_v2 = tools_v2(pipelines=seg_var['train_pipelines'],print_out=print_out)
+                tl_seg_v2.class_name2id = self.class_name2id
+                tl_seg_v2.id2color = self.id2color
+
+
+
+
             titles = ['prediction', 'answer']
             batch_size_seg_test = batch_size_seg
             seg_p = Seg_performance(len(self.class_name2id),print_out=print_out)
@@ -988,6 +1036,8 @@ class AE_Seg():
                 if self.to_train_ae is True:
                     #----AE train set quantity
                     qty_train = self.get_train_qty(self.train_path_qty,ratio,print_out=print_out,name='AE')
+
+
                     # qty_train = self.train_path_qty
                     # if ratio is not None:
                     #     if ratio <= 1.0 and ratio > 0:
@@ -1130,7 +1180,8 @@ class AE_Seg():
 
                                     #ori_labels = train_labels_ori[num_start:num_end]
                                     # ----aug data
-                                    if process_dict.get('rdm_patch'):
+
+                                    if self.return_ori_data:
                                         # aug_data_no_patch,aug_data = get_4D_data(aug_paths, self.model_shape[1:],
                                         #                         process_dict=process_dict,setting_dict=setting_dict)
                                         aug_data_no_patch, aug_data = tl.get_4D_data(aug_paths, self.model_shape[1:],
@@ -1160,11 +1211,15 @@ class AE_Seg():
                                     #batch_labels = train_labels_ori[num_start:num_end]
 
                                 #----put all data to tf placeholders
-                                if process_dict.get('rdm_patch') is True:
+                                if self.return_ori_data:
                                     feed_dict = {self.tf_input: batch_data, self.tf_input_ori: batch_data_no_patch,
                                                  self.tf_keep_prob: keep_prob}
                                 else:
                                     feed_dict = {self.tf_input: batch_data, self.tf_keep_prob: keep_prob}
+
+                                if self.infer_method == 'AE_pooling_net_V8':
+                                    img_standard = tl.get_4D_data([img_standard_path]*len(batch_data), self.model_shape[1:], dtype=self.dtype)
+                                    feed_dict[self.tf_input_standard] = img_standard
 
                                 # ----optimization
                                 try:
@@ -1211,12 +1266,21 @@ class AE_Seg():
                                     # batch_data = get_4D_data(ite_paths, self.model_shape[1:])
                                     batch_data = tl.get_4D_data(ite_paths, self.model_shape[1:],dtype=self.dtype)
 
+
                                     # ----put all data to tf placeholders
-                                    if process_dict.get('rdm_patch'):
-                                        feed_dict = {self.tf_input: batch_data, self.tf_input_ori: batch_data,
-                                                     self.tf_keep_prob: 1.0}
+                                    if self.return_ori_data:
+                                        feed_dict[self.tf_input] = batch_data
+                                        feed_dict[self.tf_input_ori] = batch_data
+                                        # feed_dict = {self.tf_input: batch_data, self.tf_input_ori: batch_data,
+                                        #              self.tf_keep_prob: 1.0}
                                     else:
-                                        feed_dict = {self.tf_input: batch_data, self.tf_keep_prob: 1.0}
+                                        feed_dict[self.tf_input] = batch_data
+                                        # feed_dict = {self.tf_input: batch_data, self.tf_keep_prob: 1.0}
+
+                                    if self.infer_method == 'AE_pooling_net_V8':
+                                        img_standard = tl.get_4D_data([img_standard_path] * len(batch_data),
+                                                                      self.model_shape[1:], dtype=self.dtype)
+                                        feed_dict[self.tf_input_standard] = img_standard
 
                                     # ----session run
                                     #sess.run(self.opt_AE, feed_dict=feed_dict)
@@ -1333,9 +1397,13 @@ class AE_Seg():
                                 if (epoch + 1) % eval_epochs == 0:
                                     for filename in self.recon_paths:
                                         test_img = self.__img_read(filename, self.model_shape[1:],dtype=self.dtype)
+                                        if self.infer_method == 'AE_pooling_net_V8':
+                                            img_standard = tl.get_4D_data([img_standard_path] * len(test_img),
+                                                                          self.model_shape[1:], dtype=self.dtype)
+                                            feed_dict[self.tf_input_standard] = img_standard
                                         # ----session run
-                                        img_sess_out = sess.run(self.recon, feed_dict={self.tf_input: test_img,
-                                                                                       self.tf_keep_prob:1.0})
+                                        feed_dict[self.tf_input] = test_img
+                                        img_sess_out = sess.run(self.recon, feed_dict=feed_dict)
                                         # ----process of sess-out
                                         img_sess_out = img_sess_out[0] * 255
                                         img_sess_out = cv2.convertScaleAbs(img_sess_out)
@@ -1468,12 +1536,13 @@ class AE_Seg():
                                                                                            dtype=self.dtype)
 
                                         # ----aug data
-                                        aug_data, aug_label = tl_seg.get_4D_data_create_mask(aug_seg_paths,
-                                                                                           self.model_shape[1:],
-                                                                                           to_norm=True,
-                                                                                           to_rgb=True,
-                                                                                           to_process=True,
-                                                                                           dtype=self.dtype)
+                                        # aug_data, aug_label = tl_seg.get_4D_data_create_mask(aug_seg_paths,
+                                        #                                                    self.model_shape[1:],
+                                        #                                                    to_norm=True,
+                                        #                                                    to_rgb=True,
+                                        #                                                    to_process=True,
+                                        #                                                    dtype=self.dtype)
+                                        aug_data, aug_label = tl_seg_v2.get_seg_batch_data(aug_seg_paths)
                                     else:
                                         # ----ori data
                                         ori_data,ori_label = tl_seg.get_4D_img_label_data(ori_seg_paths,self.model_shape[1:],
@@ -1488,10 +1557,24 @@ class AE_Seg():
                                                                   to_rgb=True,
                                                                   to_process=True,
                                                                   dtype=self.dtype)
+                                        if train_with_aug_v2:
+                                            ok_batch_paths = np.random.choice(ok_img_seg_paths,batch_size_seg,replace=False)
+                                            aug_data_2, aug_label_2 = tl_seg_v2.get_seg_batch_data(ok_batch_paths)
+                                            # a_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\temp"
+                                            # temp_img = aug_data_2[0] * 255
+                                            # temp_img = cv2.convertScaleAbs(temp_img)
+                                            # save_path = ok_batch_paths[0].split("\\")[-1].split(".")[0]
+                                            # save_path += '.bmp'
+                                            # save_path = os.path.join(a_dir, save_path)
+                                            # cv2.imencode('.bmp', temp_img)[1].tofile(save_path)
 
                                     #----data concat
                                     batch_data = np.concatenate([ori_data, aug_data], axis=0)
                                     batch_label = np.concatenate([ori_label, aug_label], axis=0)
+                                    if train_with_aug_v2:
+                                        batch_data = np.concatenate([batch_data, aug_data_2], axis=0)
+                                        batch_label = np.concatenate([batch_label, aug_label_2], axis=0)
+
                                 else:
                                     if self_create_label:
                                         batch_data, batch_label = tl_seg.get_4D_data_create_mask(ori_seg_paths,
@@ -1513,9 +1596,8 @@ class AE_Seg():
                                 #     batch_label = tl_seg.batch_resize_label(batch_label,
                                 #                                             (self.model_shape[2]//4,self.model_shape[1]//4))
 
-
-
                                 recon = sess.run(self.recon, feed_dict={self.tf_input: batch_data})
+
                                 feed_dict = {self.tf_input: batch_data,self.tf_input_recon:recon,
                                              self.tf_label_batch: batch_label,
                                              self.tf_keep_prob: keep_prob,
@@ -1572,16 +1654,16 @@ class AE_Seg():
                                     else:
                                         seg_json_paths = None
                                     #----get batch data
-                                    if self_create_label:
-                                        batch_data, batch_label = tl_seg.get_4D_data_create_mask(seg_paths,
-                                                                                                 self.model_shape[1:],
-                                                                                                 to_process=True,
-                                                                                                 dtype=self.dtype)
-                                    else:
-                                        batch_data, batch_label = tl_seg.get_4D_img_label_data(seg_paths,
-                                                                                               self.model_shape[1:],
-                                                                                               json_paths=seg_json_paths,
-                                                                                               dtype=self.dtype)
+                                    # if self_create_label:
+                                    #     batch_data, batch_label = tl_seg.get_4D_data_create_mask(seg_paths,
+                                    #                                                              self.model_shape[1:],
+                                    #                                                              to_process=True,
+                                    #                                                              dtype=self.dtype)
+                                    # else:
+                                    batch_data, batch_label = tl_seg.get_4D_img_label_data(seg_paths,
+                                                                                           self.model_shape[1:],
+                                                                                           json_paths=seg_json_paths,
+                                                                                           dtype=self.dtype)
                                     #----put all data to tf placeholders
                                     recon = sess.run(self.recon,feed_dict={self.tf_input: batch_data})
 
