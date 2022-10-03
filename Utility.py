@@ -4057,7 +4057,6 @@ class ExtractSegDefect():
 
         return qty_list
 
-
     def defect_crop2png(self,img_dir,save_dir=None,to_classify=False):
         show_num = 2
         dir_list = []
@@ -6086,10 +6085,10 @@ class NormDense(tf.keras.layers.Layer):
 if __name__ == "__main__":
     #----Extract Seg defects
     # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2"
-    img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train"
-    id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
-    a = ExtractSegDefect(id2class_name)
-    a.defect_crop2png(img_dir,to_classify=True)
+    # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train"
+    # id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
+    # a = ExtractSegDefect(id2class_name)
+    # a.defect_crop2png(img_dir,to_classify=True)
 
     # defect_name = "particle"
     # img_source = [
@@ -6301,73 +6300,79 @@ if __name__ == "__main__":
 
     #----augmentation v2
     # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220901_AOI判定OK\OK(多區OK)\num_100"
-    # id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
-    # # id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames_one_defect_class.txt"
-    # vividDefect_dict = dict(
-    #     defect_num=2, rotation_degrees=20, resize_ratio=20, lower_br_ratio=5,
-    #     ct_ratio=20, defect_png_dir=r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\defects_but_ok_20220922\crop2png",
-    #     zoom_in=[15, 15, 10, 10],  # [x_s,x_end,y_s,y_end]
-    #     margin=5, p=0.5, std_threshold=1, label_class=0, print_out=False
-    # )
-    # area_range = [100, 1000]
-    # zoom_in = 70
-    # p = 0.7
-    # pipelines = [
-    #     dict(type='CvtColor', to_rgb=True),
-    #     dict(type='RandomBlur', p=p),
-    #     dict(type='RandomBrightnessContrast', br_ratio=0.1, ct_ratio=0.3, p=p),
-    #     # dict(type='BrightnessContrast', br_ratio=0.0, ct_ratio=0.3),
-    #     # dict(type='RandomDefect', area_range=area_range, defect_num=3, pixel_range=[7, 12], zoom_in=zoom_in, p=p),
-    #     # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[50, 70], zoom_in=zoom_in, p=p),
-    #     # dict(type='RandomDefect', area_range=area_range, defect_num=3, pixel_range=[90, 120], zoom_in=zoom_in, p=p),
-    #     # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[140, 160], zoom_in=zoom_in, p=p),
-    #     # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[180, 200], zoom_in=zoom_in, p=p),
-    #     dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[200,250], zoom_in=zoom_in, p=p,label_class=0),
-    #     # dict(type='RandomPNoise', area_range=area_range, defect_num=3, zoom_in=zoom_in,p=p),
-    #     dict(type='RandomVividDefect',**vividDefect_dict),
-    #     # dict(type='RandomHorizontalFlip', p=p),
-    #     # dict(type='RandomVerticalFlip', p=p),
-    #     dict(type='RandomRotation',degrees=5,p=p),
-    #     dict(type='Resize', height=530,width=860),
-    #     # dict(type='Resize', height=512,width=832),
-    #     dict(type='RandomCrop', height=512,width=832),
-    #     # dict(type='Norm')
-    # ]
-    #
-    #
-    # show_num = 3
-    # # special_process_list = ['rdm_patch', 'rdm_perlin', 'rdm_light_defect']
-    # paths,qty = get_paths(img_dir)
-    # print("qty:",qty)
-    # dataloader = DataLoader4Seg(paths,batch_size=show_num,pipelines=pipelines,shuffle=True)
-    # # tl = tools_v2(pipelines=pipelines,print_out=True)
-    #
-    # dataloader.get_classname_id_color(id2class_name,print_out=True)
-    # # paths,qty = tl.get_paths(img_dir)
-    # # tl.set_process(process_dict, setting_dict, print_out=print_out)
-    # i = 0
-    # for batch_paths,imgs,labels in (dataloader):
-    #
-    #     print(i,imgs.shape)
-    #     i+=1
-    #     combine_data = []
-    #
-    #     for i in range(show_num):
-    #         combine_data.append(dataloader.combine_img_label(imgs[i],labels[i]))
-    #
-    #     #----display
-    #     plt.figure(figsize=(10,10))
-    #     for i in range(show_num):
-    #         plt.subplot(2, show_num, i + 1)
-    #         plt.imshow(imgs[i])
-    #         plt.subplot(2, show_num, i + 1 + show_num)
-    #         plt.imshow(combine_data[i])
-    #
-    #     # for i,img in enumerate(aug_data):
-    #     #     plt.subplot(1,show_num,i+1)
-    #     #     plt.imshow(img)
-    #     plt.show()
-    #     # break
+    img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train"
+    id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
+    # id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames_one_defect_class.txt"
+    vividDefect_dict = dict(
+        defect_num=1, rotation_degrees=20, resize_ratio=20, lower_br_ratio=5,
+        ct_ratio=20,
+        defect_png_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\defects_but_ok_20220922\defectCrop2png\defect",
+        # defect_png_dir=r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\defects_but_ok_20220922\crop2png",
+        # defect_png_dir=r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test\defectCrop2png\hole",
+        # defect_png_dir=r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1\defectCrop2png\gold_particle",
+        zoom_in=[15, 15, 10, 10],  # [x_s,x_end,y_s,y_end]
+        margin=5, p=1.0, homogeneity_threshold=1.0, label_class=1, print_out=False
+    )
+    area_range = [100, 1000]
+    zoom_in = 70
+    p = 0.7
+    pipelines = [
+        dict(type='CvtColor', to_rgb=True),
+        dict(type='RandomVividDefect', **vividDefect_dict),
+        # dict(type='RandomBlur', p=p),
+        dict(type='RandomBrightnessContrast', br_ratio=0.1, ct_ratio=0.3, p=p),
+        # dict(type='BrightnessContrast', br_ratio=0.0, ct_ratio=0.3),
+        # dict(type='RandomDefect', area_range=area_range, defect_num=3, pixel_range=[7, 12], zoom_in=zoom_in, p=p),
+        # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[50, 70], zoom_in=zoom_in, p=p),
+        # dict(type='RandomDefect', area_range=area_range, defect_num=3, pixel_range=[90, 120], zoom_in=zoom_in, p=p),
+        # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[140, 160], zoom_in=zoom_in, p=p),
+        # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[180, 200], zoom_in=zoom_in, p=p),
+        # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[200,250], zoom_in=zoom_in, p=p,label_class=0),
+        # dict(type='RandomPNoise', area_range=area_range, defect_num=3, zoom_in=zoom_in,p=p),
+
+        # dict(type='RandomHorizontalFlip', p=p),
+        # dict(type='RandomVerticalFlip', p=p),
+        dict(type='RandomRotation',degrees=5,p=p),
+        dict(type='Resize', height=530,width=860),
+        # dict(type='Resize', height=512,width=832),
+        dict(type='RandomCrop', height=512,width=832),
+        # dict(type='Norm')
+    ]
+
+
+    show_num = 3
+    # special_process_list = ['rdm_patch', 'rdm_perlin', 'rdm_light_defect']
+    paths,qty = get_paths(img_dir)
+    print("qty:",qty)
+    dataloader = DataLoader4Seg(paths,batch_size=show_num,pipelines=pipelines,shuffle=True)
+    # tl = tools_v2(pipelines=pipelines,print_out=True)
+
+    dataloader.get_classname_id_color(id2class_name,print_out=True)
+    # paths,qty = tl.get_paths(img_dir)
+    # tl.set_process(process_dict, setting_dict, print_out=print_out)
+    i = 0
+    for batch_paths,imgs,labels in (dataloader):
+
+        # print(i,imgs.shape)
+        i+=1
+        combine_data = []
+
+        for i in range(show_num):
+            combine_data.append(dataloader.combine_img_label(imgs[i],labels[i]))
+
+        #----display
+        plt.figure(figsize=(10,10))
+        for i in range(show_num):
+            plt.subplot(2, show_num, i + 1)
+            plt.imshow(imgs[i])
+            plt.subplot(2, show_num, i + 1 + show_num)
+            plt.imshow(combine_data[i])
+
+        # for i,img in enumerate(aug_data):
+        #     plt.subplot(1,show_num,i+1)
+        #     plt.imshow(img)
+        plt.show()
+        # break
 
 
 

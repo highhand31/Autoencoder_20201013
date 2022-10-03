@@ -382,7 +382,7 @@ class RandomDefect():
 class RandomVividDefect():
     def __init__(self,defect_num=5,rotation_degrees=20,resize_ratio=20,lower_br_ratio=20,
                  ct_ratio=20,defect_png_dir=r".\defects",zoom_in=[150,150,100,100],#[x_s,x_end,y_s,y_end]
-                 margin=5,p=0.5,std_threshold=5,label_class=1,print_out=False):
+                 margin=5,p=0.5,homogeneity_threshold=5,label_class=1,print_out=False):
 
         self.paths = [file.path for file in os.scandir(defect_png_dir) if file.name.split(".")[-1] == 'png']
         # qty_n = len(paths_noise)
@@ -399,6 +399,8 @@ class RandomVividDefect():
 
         #----set local var to global
         # self.area_range = area_range
+        self.w_mar_zoom = margin + zoom_in[0]
+        self.h_mar_zoom = margin + zoom_in[2]
         self.ct_ratio = ct_ratio
         self.defect_num = defect_num
         self.br_ratio = lower_br_ratio
@@ -409,7 +411,7 @@ class RandomVividDefect():
         self.zoom_in = zoom_in
         self.label_class = label_class
         self.kernel_list = [1,3,5,7]
-        self.std_threshold = std_threshold
+        self.homo_threshold = homogeneity_threshold
         self.print_out = print_out
 
     def img_png_process(self,img_p):
@@ -423,10 +425,70 @@ class RandomVividDefect():
 
         return img_p
 
+    def homogeneity_check(self,roi,homo_threshold=1.0,print_out=False):
+        if print_out:
+            msg_list = []
+
+        if isinstance(homo_threshold, float) or isinstance(homo_threshold, int):
+            roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            std = np.std(roi_gray)
+
+            if std > homo_threshold:
+                status = False
+            else:
+                status = True
+
+            if print_out:
+                msg_list.append(f"The homogeneity of roi:{std}")
+        else:
+            status = True
+
+        if print_out:
+            for msg in msg_list:
+                print(msg)
+
+        return status
+
+    def coors_overlap_check(self,h_start,h_end,w_start,w_end,coors_list,print_out=False):
+        status = False
+        if print_out:
+            msg_list = []
+        #----
+        if len(coors_list) == 0:
+            status = False
+        else:
+            for coors in coors_list:
+                range_h = range(coors[0], coors[1])
+                range_w = range(coors[2], coors[3])
+                h_status = False
+                w_status = False
+                if h_start in range_h or h_end in range_h:
+                    h_status = True
+                if w_start in range_w or w_end in range_w:
+                    w_status = True
+
+                if h_status and w_status:
+                    status = True
+                    if print_out:
+                        msg_list.append("New coors are overlapped")
+                    break
+                else:
+                    status = False
+
+        return status
+
+    def label_overlap_check(self,roi_label):
+            status = False
+
+            coors = np.where(roi_label > 0)
+            if len(coors[0]) > 0:
+                status = True
+
+            return status
+
     def __call__(self, *args, **kwargs):
         img = kwargs.get('img')
         label = kwargs.get('label')
-
 
         #---read defect images
         img_png_list = []
@@ -437,97 +499,113 @@ class RandomVividDefect():
             img_bgra = cv2.imdecode(img_bgra, -1)
 
             # ----defect image pre-process
-            img_p = img_bgra.copy()
-            img_p = self.img_png_process(img_p)
-            img_png_list.append(img_p)
+            # img_p = img_bgra.copy()
+            # img_p = self.img_png_process(img_p)
+            img_png_list.append(self.img_png_process(img_bgra))
 
         #-----start points
         h_ok, w_ok = img.shape[:-1]
-        w_mar_zoom = self.margin+self.zoom_in[0]
-        h_mar_zoom = self.margin+self.zoom_in[2]
+
         w_ok_zoom = w_ok - self.zoom_in[1]
         h_ok_zoom = h_ok - self.zoom_in[3]
         coors_list = []
+
+        #----defect paste process
         for img_png in img_png_list:
             img_de = img_png[:, :, :-1]
             mask = img_png[:, :, -1]
             h_de, w_de = img_png.shape[:-1]
+            w_ok_zoom_limit = w_ok_zoom - w_de
+            h_ok_zoom_limit = h_ok_zoom - h_de
             count = 0
             go_flag = False
-            while( go_flag is False ):
+            while(go_flag is False):
 
                 #----get start points
-                w_start = np.random.randint(w_mar_zoom, w_ok_zoom-w_de)
-                h_start = np.random.randint(h_mar_zoom, h_ok_zoom-h_de)
+                w_start = np.random.randint(self.w_mar_zoom, w_ok_zoom_limit)
+                h_start = np.random.randint(self.h_mar_zoom, h_ok_zoom_limit)
 
                 w_end = w_start + w_de
                 h_end = h_start + h_de
 
                 #----overlap check
-                #go_flag = False
-                if len(coors_list) == 0:
-                    go_flag = True
-                if len(coors_list) > 0:
-                    for coors in coors_list:
-                        range_h = range(coors[0],coors[1])
-                        range_w = range(coors[2],coors[3])
-                        h_status = False
-                        w_status = False
-                        if h_start in range_h or h_end in range_h:
-                            h_status = True
-                        if w_start in range_w or h_end in range_w:
-                            w_status = True
+                overlap_check = self.coors_overlap_check(h_start,h_end,w_start,w_end,coors_list,print_out=self.print_out)
+                if overlap_check is True:
+                    continue
 
-                        if h_status and w_status:
-                            if self.print_out:
-                                print("new coors are overlapped")
-                            go_flag = False
-                        else:
-                            go_flag = True
+                #----homogeneity check
+                roi = img[h_start:h_end, w_start:w_end, :]
+                homo_check = self.homogeneity_check(roi, homo_threshold=self.homo_threshold, print_out=self.print_out)
+                if homo_check is False:
+                    continue
+
+                #----label roi class number check
+                if label is None:
+                    go_flag = True
+                else:
+                    roi_label = label[h_start:h_end, w_start:w_end]
+                    label_overlap_check = self.label_overlap_check(roi_label)
+
+                    if label_overlap_check:
+                        if self.print_out:
+                            print("label overlapped")
+                        continue
+                    else:
+                        go_flag = True
 
                 #----img combination
                 if go_flag:
-                    roi = img[h_start:h_end,w_start:w_end,:]
-                    std = np.std(roi)
+                    #----get roi region
+                    not_mask = 255 - mask
+                    # max_value_roi = np.max(roi)
+                    roi = cv2.bitwise_and(roi, roi, mask=not_mask)
 
-                    if std > self.std_threshold:
-                        go_flag = False
-                        if self.print_out:
-                            print("Roi std={} which exceeds the threshold:{}".format(std,self.std_threshold))
+                    defect = cv2.bitwise_and(img_de, img_de, mask=mask)
+                    #----find max values of 2 areas
+                    # max_value_roi = np.max(roi)
+                    # max_value_defect = np.max(defect)
+                    # coors = np.where(defect > 0)
+                    # ave_value_defect = np.mean(defect[coors])
+                    # print("max_value_roi:",max_value_roi)
+                    # print("max_value_defect:",max_value_defect)
+                    # print("ave_value_defect:",ave_value_defect)
+                    # if ave_value_defect < 127:
+                    #     defect = defect.astype(np.float32)
+                    #     defect = defect / max_value_defect * max_value_roi
+                    #     defect = cv2.convertScaleAbs(defect)
+                    #     print("dark edge process")
+                    # else:
+                    #     defect = defect.astype(np.float32)
+                    #     defect = defect / defect[coors].min() * max_value_roi
+                    #     defect = cv2.convertScaleAbs(defect)
+                    #     print("light edge process")
 
-                    else:
-                        #----get roi region
-                        not_mask = 255 - mask
-                        roi = cv2.bitwise_and(roi, roi, mask=not_mask)
 
-                        defect = cv2.bitwise_and(img_de, img_de, mask=mask)
-                        max_value_roi = np.max(roi)
-                        max_value_defect = np.max(defect)
+                    # if max_value_roi < max_value_defect:
+                    #     defect = defect.astype(np.float32)
+                    #     defect = defect / max_value_defect * max_value_roi
+                    #     defect = cv2.convertScaleAbs(defect)
 
-                        defect = defect.astype(np.float32)
-                        defect = defect / max_value_defect * max_value_roi
-                        defect = cv2.convertScaleAbs(defect)
+                    patch = cv2.add(roi,defect)
 
-                        patch = cv2.add(roi,defect)
+                    #----blur
+                    patch = cv2.GaussianBlur(patch, (3,3), 0, 0)
 
-                        img[h_start:h_end, w_start:w_end, :] = patch
-                        coors_list.append([h_start,h_end,w_start,w_end])
-                        if label is not None:
-                            if self.label_class != 0:
-                                # roi_label = np.zeros((h_de,w_de),dtype=np.uint8)
-                                roi_label = mask.copy()
-                                roi_label = np.where(roi_label == 255,self.label_class,0)
-                                # roi_label[coors_label] = self.label_class
-                                label[h_start:h_end, w_start:w_end] = roi_label
+                    img[h_start:h_end, w_start:w_end, :] = patch
+                    coors_list.append([h_start,h_end,w_start,w_end])
+                    if label is not None:
+                        if self.label_class != 0:
+                            # roi_label = np.zeros((h_de,w_de),dtype=np.uint8)
+                            roi_label = mask.copy()
+                            roi_label = np.where(roi_label == 255,self.label_class,0)
+                            # roi_label[coors_label] = self.label_class
+                            label[h_start:h_end, w_start:w_end] = roi_label
 
                 count += 1
                 #print("count:",count)
 
-                if count >= 500:
+                if count >= 100:
                     break
-
-
-
 
         if label is None:
             return img
