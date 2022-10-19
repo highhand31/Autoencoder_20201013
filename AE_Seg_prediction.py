@@ -2,7 +2,7 @@ import os,math,cv2,json,imgviz,time,re
 import numpy as np
 import tensorflow
 import matplotlib.pyplot as plt
-from Utility import tools,Seg_performance,get_classname_id_color,tf_utility,create_stack_img,get_paths,DataLoader4Seg
+from AE_Seg_Util import tools,Seg_performance,get_classname_id_color,tf_utility,create_stack_img,get_paths,DataLoader4Seg
 
 #----tensorflow version check
 if tensorflow.__version__.startswith('1.'):
@@ -1123,7 +1123,7 @@ def recon_seg_prediction_v3(img_dir,pb_path,node_dict,img_save_dict,threshold_di
         makedirs(make_dir_list)
 
         #----announce dataloader
-        dataloader = DataLoader4Seg(paths, batch_size=2, pipelines=pipelines, shuffle=False)
+        dataloader = DataLoader4Seg(paths, batch_size=2, pipelines=pipelines, to_shuffle=False)
 
         #----get classname2id, id2color(from train_results)
         if id2class_name_path is None:
@@ -1484,9 +1484,9 @@ def infer_speed_test(img_dir,pb_path,node_dict,batch_size=1,set_img_num=1000):
             # batch_data = tf_tl.get_4D_data(seg_paths,model_shape[1:])
             feed_dict = {tf_input: batch_data}
 
-            batch_recon = tf_tl.sess.run(tf_recon, feed_dict=feed_dict)
+            # batch_recon = tf_tl.sess.run(tf_recon, feed_dict=feed_dict)
             if tf_input_recon is not None:
-                feed_dict[tf_input_recon] = batch_recon
+                feed_dict[tf_input_recon] = batch_data
             # predict_label = tf_tl.sess.run(tf_prediction,
             #                                feed_dict=feed_dict)  # ,tf_input_recon:batch_recon
 
@@ -1521,17 +1521,19 @@ if __name__ == "__main__":
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\selected"
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\All_and_no_selected"
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\TLearning_20220715"
-        # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2",
+        r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
+        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
+        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2",
         # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test',
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\defect_parts\小紅點_淺瑕疵\only_fig",
+
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test_one_defect_class"
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220829_AOI_NG\real_ans_ori\OK",
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220829_AOI_NG\real_ans\low_contrast"
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_矽電Label_Tidy_data\VRS_Json\test",
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_AOI_NG\real_ans\gold_residual"
         # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_AOI_NG\real_ans\hole',
-        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\defects_but_ok_20220922\只有圖"
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\defects_but_ok_20220922\只有圖"
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_矽電Label_Tidy_data\VRS_Json\NG\Json"
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_AOI_NG\real_ans\NG\hole"
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_AOI_NG\real_ans\NG\particle"
@@ -1578,13 +1580,18 @@ if __name__ == "__main__":
     # pb_path = r"D:\code\model_saver\AE_Seg_139\infer_20220718130302.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_140\no_ok\infer_best_epoch48.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_140\infer_20220719094845.pb"
-    # pb_path = r"D:\code\model_saver\AE_Seg_141\infer_best_epoch7.pb"
+    # pb_path = r"C:\Users\User\Downloads\NST_AI_PD55077AP_FrontSide_LightSet1\Models\infer_best_epoch7.nst"
+    # pb_path = r"D:\dataset\optotech\silicon_division\ST_2118\Models\20220907_0.0.5_0.0.6\NST_AI_ST-2118_FrontSide_LightSet1\Models\infer_best_epoch76.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_142\infer_best_epoch298.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch77.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch57.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch119.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch61.nst"
-    pb_path = r"D:\code\model_saver\AE_Seg_149\infer_best_epoch12.nst"
+
+    pb_path = r"D:\code\model_saver\AE_Seg_149\infer_best_epoch14.nst"#infer_20221006174700 infer_20221006181259
+    # pb_path = r"D:\code\model_saver\AE_Seg_150\infer_best_epoch25.nst"
+    # pb_path = r"D:\code\model_saver\AE_Seg_151\infer_best_epoch99.nst"
+    # pb_path = r"D:\code\model_saver\AE_Seg_152\infer_best_epoch99.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch82.nst"
     # pb_path = r"D:\code\model_saver\AE_Seg_145\infer_best_epoch101.pb"
     # pb_path = r"D:\code\model_saver\AE_Seg_147\infer_best_epoch5.nst"
@@ -1610,11 +1617,11 @@ if __name__ == "__main__":
     #                      prob_threshold=prob_threshold,
     #                      cc_th=cc_th
     #                      )
-    # infer_speed_test(img_dir, pb_path, node_dict,batch_size=1,set_img_num=1000)
+    infer_speed_test(img_dir, pb_path, node_dict,batch_size=1,set_img_num=1000)
 
-    compare_with_answers = False
+    compare_with_answers = True
     img_save_dict = {
-        'to_save_predict_image': True,
+        'to_save_predict_image': False,
         'img_compare_with_ori': True,
         'to_save_false_detected': False,
         'to_save_defect_undetected': False,
@@ -1623,7 +1630,7 @@ if __name__ == "__main__":
     }
 
     threshold_dict = {
-        'prob_threshold': 0.8,
+        'prob_threshold': None,
         'cc_th': None,
         'acc_threshold': 0.3,
     }
@@ -1636,10 +1643,10 @@ if __name__ == "__main__":
         dict(type='Norm')
     ]
 
-    recon_seg_prediction_v3(img_dir, pb_path, node_dict, img_save_dict, threshold_dict,
-                            pipelines=pipelines,
-                            compare_with_answers=compare_with_answers,
-                            id2class_name_path=id2class_name_path)
+    # recon_seg_prediction_v3(img_dir, pb_path, node_dict, img_save_dict, threshold_dict,
+    #                         pipelines=pipelines,
+    #                         compare_with_answers=compare_with_answers,
+    #                         id2class_name_path=id2class_name_path)
 
     #----for loop
     # prob_thresholds = [None,0.6,0.9]

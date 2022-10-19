@@ -1,7 +1,7 @@
 import numpy as np
 import cv2,os,shutil,math,time,json,re
 import matplotlib.pyplot as plt
-from Utility import tools,tf_utility
+from AE_Seg_Util import tools,tf_utility
 from Embedding_center_comparison import model_restore_from_pb
 
 import tensorflow

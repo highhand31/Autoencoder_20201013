@@ -686,7 +686,7 @@ def first_layer_process(tf_tensor,data_dict):
         do_type = dict_first_layer.get('type')
         if do_type == 'resize':
             size = dict_first_layer.get('size')  # (h,w)
-            tf_input_layer = v2.image.resize(tf_tensor, size)
+            tf_input_layer = v2.image.resize(tf_tensor, size,method='nearest')
         elif do_type == 'CNN_downSampling':
             filter = dict_first_layer.get('filter')
             kernel = dict_first_layer.get('kernel')
@@ -1478,6 +1478,131 @@ def Seg_pooling_net_V9(tf_input,tf_input_standard,encode_dict,decode_dict,out_ch
     # concat = tf.concat(transpose_list, axis=-1)
     # msg = "concat shape = {}".format(concat.shape)
     # msg_list.append(msg)
+
+    if cnn_type == 'resnet':
+        net = resnet_block(net, k_size=kernel, filters=filters,
+                           activation=activation,to_cnn_input=True)
+        net = resnet_block(net, k_size=kernel, filters=out_channel,
+                           activation=None,to_cnn_input=True)
+    else:
+        net = Conv(net, filters, kernel=kernel, activation=activation)
+        net = Conv(net, out_channel, kernel=kernel, padding="same", activation=None)  # name='output_AE'
+
+    msg = "output shape = {}".format(net.shape)
+    msg_list.append(msg)
+
+
+    say_sth(msg_list,print_out=print_out)
+
+    return net
+
+def Seg_pooling_net_V10(tf_input,tf_input_2,encode_dict,decode_dict,out_channel=3,to_reduce=False,print_out=False):
+
+    '''
+    adopted from Seg_pooling_net_V4
+    '''
+    #----var
+    net_list = list()
+    transpose_list = list()
+    cnn_list = list()
+    transpose_filter = [1, 1]
+    msg_list = list()
+
+    #----dummy output
+    pre_embeddings = tf.layers.flatten(tf_input_2)
+    embeddings = tf.nn.l2_normalize(pre_embeddings, 1, 1e-10, name='dummy_out')
+
+    input_size = (tf_input.shape[1].value,tf_input.shape[2].value)#(h,w)
+
+
+    #----first layer process
+    tf_input_layer, do_type = first_layer_process(tf_input, encode_dict)
+    # tf_input_layer, do_type = first_layer_process(tf.image.rgb_to_grayscale(tf_input), encode_dict)
+    msg = "First layer process: {} with shape = {}".format(do_type, tf_input_layer.shape)
+    say_sth(msg, print_out=print_out)
+
+    pool_type_list = encode_dict['pool_type_list']
+    filter_list = encode_dict['filter_list']
+    kernel_list = encode_dict['kernel_list']
+    pool_kernel_list = encode_dict['pool_kernel_list']
+    stride_list = encode_dict['stride_list']
+    activation = get_activation(encode_dict.get('activation'))
+    multi_ratio = encode_dict.get('multi_ratio')
+
+
+    if multi_ratio is not None:
+        filter_list = np.array(filter_list) * multi_ratio
+        filter_list = filter_list.astype(np.int16)
+
+    #----filters vs pooling times
+    filter_list = np.array(filter_list) // len(pool_type_list)
+    layer_num = 0
+    for kernel,filters,strides,pool_kernel in zip(kernel_list,filter_list,stride_list,pool_kernel_list):
+        if layer_num == 0:
+            data_input = tf_input_layer
+        else:
+            data_input = net
+
+        net = v2.keras.layers.Conv2D(filters,kernel,strides=1,padding='same')(data_input)
+        cnn_list.append(net)
+        net = activation(net)
+
+        pool_list = []
+        for pool_type in pool_type_list:
+            if pool_type == 'max':
+                net_temp = v2.keras.layers.MaxPool2D(pool_size=pool_kernel,strides=strides,padding='same')(net)
+                pool_list.append(net_temp)
+            elif pool_type == 'ave':
+                net_temp = v2.keras.layers.AveragePooling2D(pool_size=pool_kernel,strides=strides,padding='same')(net)
+                pool_list.append(net_temp)
+            elif pool_type == 'cnn':
+                net_temp = v2.keras.layers.Conv2D(filters,kernel,strides=strides,padding='same')(net)
+                pool_list.append(net_temp)
+        net = v2.concat(pool_list,axis=-1)
+        layer_num += 1
+        msg_list.append("encode_{} shape: {}".format(layer_num+1,net.shape))
+
+    # -----------------------------------------------------------------------
+    # --------Decode--------
+    # -----------------------------------------------------------------------
+    cnn_type = decode_dict['cnn_type']
+    filter_list = decode_dict['filter_list']
+    kernel_list = decode_dict['kernel_list']
+    stride_list = decode_dict['stride_list']
+    activation = get_activation(decode_dict.get('activation'))
+    multi_ratio = decode_dict.get('multi_ratio')
+
+
+    if multi_ratio is not None:
+        filter_list = np.array(filter_list) * multi_ratio
+        filter_list = filter_list.astype(np.int16)
+
+    # ----filters vs pooling times
+    filter_list = np.array(filter_list) // len(pool_type_list)
+
+    #----decode but use resize for the last layer
+    layer_num = 0
+    for kernel, filters, strides in zip(kernel_list[:-1], filter_list[:-1], stride_list[:-1]):
+        # decode = tf.layers.conv2d_transpose(net, filters, transpose_filter, strides=strides, padding='same')
+        decode = v2.keras.layers.Conv2DTranspose(filters,1,strides=strides,padding='same')(net)
+
+        if len(cnn_list) == len(kernel_list):
+            decode = v2.add(decode,cnn_list[::-1][layer_num])
+
+        if cnn_type == 'resnet':
+            net = resnet_block(decode, k_size=kernel, filters=filters,
+                               activation=activation, stride=1, to_cnn_input=False)
+        else:
+            net = v2.keras.layers.Conv2D(filters,kernel,strides=1,padding='same')(decode)
+
+        layer_num += 1
+        msg_list.append("decode_{} shape: {}".format(layer_num + 1, net.shape))
+
+    #----resize
+    net = v2.image.resize(net, input_size, method='nearest')
+
+
+
 
     if cnn_type == 'resnet':
         net = resnet_block(net, k_size=kernel, filters=filters,

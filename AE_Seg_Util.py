@@ -3641,7 +3641,7 @@ class tf_utility(tools):
         return re_img
 
 class DataLoader4Seg():
-    def __init__(self,paths,batch_size=32,pipelines=None,shuffle=True):
+    def __init__(self,paths,batch_size=32,pipelines=None,to_shuffle=True,print_out=True):
         qty = len(paths)
         ites = math.ceil(qty / batch_size)
         if isinstance(paths,np.ndarray) is False:
@@ -3650,10 +3650,12 @@ class DataLoader4Seg():
         #     if isinstance(labels, np.ndarray) is False:
         #         labels = np.array(labels)
         self.qty = qty
+        self.to_shuffle = to_shuffle
         self.batch_size = batch_size
         self.paths = paths
         self.iterations = ites
         self.ite_num = -1
+        self.print_out = print_out
         self.shape_keys = [
             "label",
             "points",
@@ -3662,12 +3664,17 @@ class DataLoader4Seg():
             "flags",
         ]
         self.transforms = self.pipeline2transform(pipelines)
-        if shuffle:
+        if to_shuffle:
             self.shuffle()
 
     def shuffle(self):
         indices = np.random.permutation(self.qty)
         self.paths = self.paths[indices]
+
+    def reset(self):
+        if self.to_shuffle:
+            self.shuffle()
+        self.ite_num = -1
 
     def pipeline2transform(self, pipelines):
         transforms = []
@@ -3696,36 +3703,62 @@ class DataLoader4Seg():
 
             if img is None:
                 msg = "read failed:".format(path)
-                say_sth(msg)
+                say_sth(msg,print_out=self.print_out)
             else:
-                ext = path.split(".")[-1]
-                json_path = path.strip(ext) + 'json'
-
-                # ----read the json file
-                if not os.path.exists(json_path):
-                    lbl = np.zeros(img.shape[:-1], dtype=np.uint8)
-                    json_exist = False
-                else:
-                    label_shapes = self.get_label_shapes(json_path)
-                    if label_shapes is None:
-                        continue
-                    try:
-                        lbl = self.shapes_to_label(
-                            img_shape=img.shape,
-                            shapes=label_shapes,
-                            label_name_to_value=self.class_name2id,
-                        )
-                    except:
-                        print("label Error:", json_path)
-
+                lbl = self.get_label_image(path,img.shape)
+                # print("get lbl ok")
                 if len(self.transforms) > 0:
                     for transform in self.transforms:
-                        img,lbl = transform(img=img,label=lbl)
+                        img, lbl = transform(img=img, label=lbl)
+                    # print("transform ok")
+
 
                 re_img.append(img)
                 re_label.append(lbl)
 
         return np.array(re_img), np.array(re_label)
+
+    def get_label_image(self,img_path,img_shape):
+        lbl = None
+        ext = img_path.split(".")[-1]
+        json_path = img_path.strip(ext) + 'json'
+
+        # ----read the json file
+        if os.path.exists(json_path):
+            label_shapes = self.get_label_shapes(json_path)
+            if label_shapes is None:
+                pass
+            else:
+                try:
+                    lbl = self.shapes_to_label(
+                        img_shape=img_shape,
+                        shapes=label_shapes,
+                        label_name_to_value=self.class_name2id,
+                    )
+                except:
+
+                    print("Error when label image was formed:", json_path)
+
+        if lbl is None:
+            lbl = np.zeros(img_shape[:-1], dtype=np.uint8)
+
+        return lbl
+
+        # if not os.path.exists(json_path):
+        #     lbl = np.zeros(img_shape[:-1], dtype=np.uint8)
+        # else:
+        #     label_shapes = self.get_label_shapes(json_path)
+        #     if label_shapes is None:
+        #         lbl = np.zeros(img_shape[:-1], dtype=np.uint8)
+        #     else:
+        #         try:
+        #             lbl = self.shapes_to_label(
+        #                 img_shape=img_shape,
+        #                 shapes=label_shapes,
+        #                 label_name_to_value=self.class_name2id,
+        #             )
+        #         except:
+        #             print("label Error:", json_path)
 
     def get_label_shapes(self, json_path):
 
@@ -3903,20 +3936,34 @@ class DataLoader4Seg():
                 re_img[coors] = color
         return re_img
 
+    def show_data_attributes(self):
+        for path in self.ite_paths:
+            print("path:",path)
+
+        print(f"img shape:{self.imgs.shape}, label shape:{self.labels.shape}")
+        print(f"img dtype:{self.imgs.dtype}, label dtype:{self.labels.dtype}")
+        print(f"image max value:",self.imgs.max())
+
+
     def __next__(self):
         self.ite_num += 1
+        # print("ite_num:",self.ite_num)
         if self.ite_num >= self.iterations:
+            # print("stop")
             raise StopIteration
         else:
             num_start = self.batch_size * self.ite_num
             num_end = np.minimum(num_start + self.batch_size, self.qty)
+            # print("num_start:",num_start)
+            # print("num_end:",num_end)
 
-            paths = self.paths[num_start:num_end]
-            imgs,labels = self.get_batch_data(paths)
+            self.ite_paths = self.paths[num_start:num_end]
+            self.imgs,self.labels = self.get_batch_data(self.ite_paths)
+            # print("feed back")
 
             # return self.paths[num_start:num_end]
 
-            return paths,imgs,labels
+            return self.ite_paths, self.imgs, self.labels
 
     # def __call__(self, *args, **kwargs):
     #     paths = self.__next__()
@@ -3940,8 +3987,8 @@ class ExtractSegDefect():
 
     def defect_analysis(self,img_source,img_ext='png'):
         #----var
-        pixel_qty = []
-        pixel_value = []
+        areas = []
+        pixel_values = []
         height_value = []
         width_value = []
         hwRatio_value = []
@@ -3964,11 +4011,11 @@ class ExtractSegDefect():
 
                 #----pixel qty
                 coors = np.where(mask == 255)
-                pixel_qty.append(len(coors[0]))
+                areas.append(len(coors[0]))
                 # pixel_qty.append(np.count_nonzero(mask))
 
                 #----pixel value
-                pixel_value.extend(img_gray[coors])
+                pixel_values.extend(img_gray[coors])
 
                 #----height value
                 # height_value.append(img.shape[0])
@@ -3994,10 +4041,27 @@ class ExtractSegDefect():
                 #----
 
         # ----pixel qty analysis
-        qty_list = self.get_unique_qty(pixel_qty)
+        unique_areas_list,qty_list = self.get_unique_qty(areas)
 
-        # ----pixel value analysis
-        value_qty_list = self.get_unique_qty(pixel_value)
+        #----pixel value analysis
+        unique_pixel_value_list, value_qty_list = self.get_unique_qty(pixel_values)
+        total_qty = np.sum(value_qty_list)
+        #----比例最多的pixel計算
+        sorts = np.argsort(value_qty_list)
+        count = 0
+        value_range_list = []
+        accumu_ratio = 0
+        for i,arg in enumerate(sorts[::-1]):
+            s_qty = value_qty_list[arg]
+            ratio = s_qty / total_qty
+            accumu_ratio += ratio
+            value_range_list.append(unique_pixel_value_list[arg])
+            print(f"pixel_value:{unique_pixel_value_list[arg]}, qty:{s_qty}, ratio:{ratio}, accumulated ratio:{accumu_ratio}")
+
+            if accumu_ratio >= 0.7:
+                print(f"The pixel range of {accumu_ratio*100}% data is from {np.min(value_range_list)} to {np.max(value_range_list)}")
+                break
+
 
         #----height value analysis
         # height_qty_list = self.get_unique_qty(height_value)
@@ -4006,28 +4070,28 @@ class ExtractSegDefect():
         # width_qty_list = self.get_unique_qty(width_value)
 
         #----pixel difference between defect and background
-        diff_qty_list = self.get_unique_qty(diff_value)
+        unique_diff_value_list,diff_qty_list = self.get_unique_qty(diff_value)
 
 
-        ratio_qty_list = self.get_unique_qty(hwRatio_value)
+        unique_hwRatio_value_list,ratio_qty_list = self.get_unique_qty(hwRatio_value)
 
         #----plots display
         plt.figure(figsize=(15,15))
 
         plt.subplot(show_y,show_x,1)
-        plt.plot(np.unique(pixel_qty),qty_list)
+        plt.plot(unique_areas_list,qty_list)
         plt.title("Pixel qty histogram")
         plt.xlabel("Pixel qty")
         plt.ylabel("Image qty")
 
         plt.subplot(show_y, show_x, 2)
-        plt.plot(np.unique(pixel_value), value_qty_list)
+        plt.plot(unique_pixel_value_list, value_qty_list)
         plt.title("Gray scale histogram")
         plt.xlabel("pixel value")
         plt.ylabel("Qty")
 
         plt.subplot(show_y, show_x, 3)
-        plt.plot(np.unique(hwRatio_value), ratio_qty_list)
+        plt.plot(unique_hwRatio_value_list, ratio_qty_list)
         # plt.plot(np.unique(height_value), height_qty_list,label='Height')
         # plt.plot(np.unique(width_value), width_qty_list,label='Width')
         plt.title("Height/width  ratio qty histogram")
@@ -4042,20 +4106,104 @@ class ExtractSegDefect():
         # plt.ylabel("Qty")
 
         plt.subplot(show_y, show_x, 4)
-        plt.plot(np.unique(diff_value), diff_qty_list)
+        plt.plot(unique_diff_value_list, diff_qty_list)
         plt.title("Diff qty histogram")
         plt.xlabel("Mean diff value")
         plt.ylabel("Qty")
 
         plt.show()
 
+    def sort_by_area(self,img_source,area_threshold=25,sort_type='under',img_ext='png'):
+        paths, path_qty = self.get_paths(img_source, img_ext=img_ext)
+        if path_qty == 0:
+            print(f"沒有符合{img_ext}的圖片進行分析")
+        else:
+            print(f"總共有{path_qty}張圖片進行分析")
+            remove_list = []
+
+            for i,path in enumerate(paths):
+                img = np.fromfile(path, dtype=np.uint8)
+                img = cv2.imdecode(img, 1)
+                h,w = img.shape[:2]
+                if sort_type == "under":
+                    if h * w < area_threshold:
+                        remove_list.append(i)
+                else:
+                    if h * w >= area_threshold:
+                        remove_list.append(i)
+
+            #----remove images to another folder
+            if len(remove_list) > 0:
+                dir_name = f"sortByArea_{sort_type}_{area_threshold}"
+                if isinstance(img_source,list):
+                    root_dir = img_source[0]
+                else:
+                    root_dir = img_source
+                save_dir = os.path.join(root_dir, dir_name)
+                if not os.path.exists(save_dir):
+                    os.makedirs(save_dir)
+
+                for idx in remove_list:
+                    new_path = paths[idx].split("\\")[-1]
+                    new_path = os.path.join(save_dir,new_path)
+
+                    shutil.move(paths[idx],new_path)
+
+                #----
+                print(f"總共有{len(remove_list)}張圖片符合條件移至{save_dir}")
+            else:
+                print(f"總共有{len(remove_list)}張圖片符合條件")
+
+    def sort_by_HW_ratio(self,img_source,HW_ratio_threshold=25,sort_type='under',img_ext='png'):
+        paths, path_qty = self.get_paths(img_source, img_ext=img_ext)
+        if path_qty == 0:
+            print(f"沒有符合{img_ext}的圖片進行分析")
+        else:
+            print(f"總共有{path_qty}張圖片進行分析")
+            remove_list = []
+            thre = HW_ratio_threshold / 100
+            for i, path in enumerate(paths):
+                img = np.fromfile(path, dtype=np.uint8)
+                img = cv2.imdecode(img, 1)
+                h, w = img.shape[:2]
+                ratio = h / w - 1.0
+                if sort_type == "under":
+                    if ratio >= - thre and ratio <= thre:
+                        remove_list.append(i)
+                else:
+                    if ratio < - thre or ratio > thre:
+                        remove_list.append(i)
+
+            # ----remove images to another folder
+            if len(remove_list) > 0:
+                dir_name = f"sortByHWRatio_{sort_type}_{HW_ratio_threshold}"
+                if isinstance(img_source, list):
+                    root_dir = img_source[0]
+                else:
+                    root_dir = img_source
+                save_dir = os.path.join(root_dir, dir_name)
+                if not os.path.exists(save_dir):
+                    os.makedirs(save_dir)
+
+                for idx in remove_list:
+                    new_path = paths[idx].split("\\")[-1]
+                    new_path = os.path.join(save_dir, new_path)
+
+                    shutil.move(paths[idx], new_path)
+
+                # ----
+                print(f"總共有{len(remove_list)}張圖片符合條件移至{save_dir}")
+            else:
+                print(f"總共有{len(remove_list)}張圖片符合條件")
+
     def get_unique_qty(self,value_list):
         qty_list = []
-        for idx in np.unique(value_list):
+        unique_value_list = np.unique(value_list)
+        for idx in unique_value_list:
             coors = np.where(value_list == idx)
             qty_list.append(len(coors[0]))
 
-        return qty_list
+        return unique_value_list,qty_list
 
     def defect_crop2png(self,img_dir,save_dir=None,to_classify=False):
         show_num = 2
@@ -4227,9 +4375,11 @@ class ExtractSegDefect():
             #     instances.append(instance)
             # ins_id = instances.index(instance) + 1
             cls_id = label_name_to_value[label]
-
-            mask = self.shape_to_mask(img_shape[:2], points, shape_type)
-            cls[mask] = cls_id
+            try:
+                mask = self.shape_to_mask(img_shape[:2], points, shape_type)
+                cls[mask] = cls_id
+            except:
+                mask = None
             # ins[mask] = ins_id
 
         return cls
@@ -4373,8 +4523,6 @@ def create_stack_img(img_list,margin=10):
 
     # ----create all zero background
     zeros = np.zeros([max(h_list) + 2 * margin, sum(w_list) + (len(img_list) + 1) * margin, 3], dtype=np.uint8)
-
-
 
     for i,img in enumerate(img_list):
         h, w = img.shape[:2]
@@ -6061,26 +6209,6 @@ def defect_qty_count(json_source):
     for key,value in class_qty_dict.items():
         print("{}:{}".format(key,value))
 
-class NormDense(tf.keras.layers.Layer):
-
-    def __init__(self, feature_num, classes=1000, output_name=''):
-        super(NormDense, self).__init__()
-        self.classes = classes
-        self.w = self.add_weight(name='norm_dense_w', shape=(feature_num, self.classes),
-                                 initializer='random_normal', trainable=True)
-        self.output_name = output_name
-        print("W shape = ", self.w.shape)
-
-    # def build(self, input_shape):
-    #     self.w = self.add_weight(name='norm_dense_w', shape=(input_shape[-1], self.classes),
-    #                              initializer='random_normal', trainable=True)
-
-    def call(self, inputs, **kwargs):
-        norm_w = tf.nn.l2_normalize(self.w, axis=0)
-        x = tf.matmul(inputs, norm_w, name=self.output_name)
-
-        return x
-
 
 if __name__ == "__main__":
     #----Extract Seg defects
@@ -6185,11 +6313,11 @@ if __name__ == "__main__":
     # img_mask(img_source, json_path,zoom_in_value=[75,77,88,88], img_type='path')
 
     #----check results
-    # dir_path = r"D:\code\model_saver\AE_Seg_148"
+    dir_path = r"D:\code\model_saver\AE_Seg_151"
     # dir_path = r"C:\Users\User\Desktop\train_result"
     # dir_path = r"D:\code\model_saver\AE_Seg_139"
     # only2see = ['seg_test_defect_sensitivity_list']
-    # check_results(dir_path, encript_flag=True,epoch_range=None,only2see=None)
+    check_results(dir_path, encript_flag=True,epoch_range=None,only2see=None)
 
     #----result comparison
     # result_dict = {
@@ -6298,81 +6426,8 @@ if __name__ == "__main__":
 
 
 
-    #----augmentation v2
-    # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220901_AOI判定OK\OK(多區OK)\num_100"
-    img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train"
-    id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
-    # id2class_name = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames_one_defect_class.txt"
-    vividDefect_dict = dict(
-        defect_num=1, rotation_degrees=20, resize_ratio=20, lower_br_ratio=5,
-        ct_ratio=20,
-        defect_png_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\defects_but_ok_20220922\defectCrop2png\defect",
-        # defect_png_dir=r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\defects_but_ok_20220922\crop2png",
-        # defect_png_dir=r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test\defectCrop2png\hole",
-        # defect_png_dir=r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1\defectCrop2png\gold_particle",
-        zoom_in=[15, 15, 10, 10],  # [x_s,x_end,y_s,y_end]
-        margin=5, p=1.0, homogeneity_threshold=1.0, label_class=1, print_out=False
-    )
-    area_range = [100, 1000]
-    zoom_in = 70
-    p = 0.7
-    pipelines = [
-        dict(type='CvtColor', to_rgb=True),
-        dict(type='RandomVividDefect', **vividDefect_dict),
-        # dict(type='RandomBlur', p=p),
-        dict(type='RandomBrightnessContrast', br_ratio=0.1, ct_ratio=0.3, p=p),
-        # dict(type='BrightnessContrast', br_ratio=0.0, ct_ratio=0.3),
-        # dict(type='RandomDefect', area_range=area_range, defect_num=3, pixel_range=[7, 12], zoom_in=zoom_in, p=p),
-        # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[50, 70], zoom_in=zoom_in, p=p),
-        # dict(type='RandomDefect', area_range=area_range, defect_num=3, pixel_range=[90, 120], zoom_in=zoom_in, p=p),
-        # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[140, 160], zoom_in=zoom_in, p=p),
-        # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[180, 200], zoom_in=zoom_in, p=p),
-        # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[200,250], zoom_in=zoom_in, p=p,label_class=0),
-        # dict(type='RandomPNoise', area_range=area_range, defect_num=3, zoom_in=zoom_in,p=p),
-
-        # dict(type='RandomHorizontalFlip', p=p),
-        # dict(type='RandomVerticalFlip', p=p),
-        dict(type='RandomRotation',degrees=5,p=p),
-        dict(type='Resize', height=530,width=860),
-        # dict(type='Resize', height=512,width=832),
-        dict(type='RandomCrop', height=512,width=832),
-        # dict(type='Norm')
-    ]
 
 
-    show_num = 3
-    # special_process_list = ['rdm_patch', 'rdm_perlin', 'rdm_light_defect']
-    paths,qty = get_paths(img_dir)
-    print("qty:",qty)
-    dataloader = DataLoader4Seg(paths,batch_size=show_num,pipelines=pipelines,shuffle=True)
-    # tl = tools_v2(pipelines=pipelines,print_out=True)
-
-    dataloader.get_classname_id_color(id2class_name,print_out=True)
-    # paths,qty = tl.get_paths(img_dir)
-    # tl.set_process(process_dict, setting_dict, print_out=print_out)
-    i = 0
-    for batch_paths,imgs,labels in (dataloader):
-
-        # print(i,imgs.shape)
-        i+=1
-        combine_data = []
-
-        for i in range(show_num):
-            combine_data.append(dataloader.combine_img_label(imgs[i],labels[i]))
-
-        #----display
-        plt.figure(figsize=(10,10))
-        for i in range(show_num):
-            plt.subplot(2, show_num, i + 1)
-            plt.imshow(imgs[i])
-            plt.subplot(2, show_num, i + 1 + show_num)
-            plt.imshow(combine_data[i])
-
-        # for i,img in enumerate(aug_data):
-        #     plt.subplot(1,show_num,i+1)
-        #     plt.imshow(img)
-        plt.show()
-        # break
 
 
 

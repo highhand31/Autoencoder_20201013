@@ -381,10 +381,11 @@ class RandomDefect():
 
 class RandomVividDefect():
     def __init__(self,defect_num=5,rotation_degrees=20,resize_ratio=20,lower_br_ratio=20,
-                 ct_ratio=20,defect_png_dir=r".\defects",zoom_in=[150,150,100,100],#[x_s,x_end,y_s,y_end]
+                 ct_ratio=20,defect_png_source=r".\defects",zoom_in=[70,70,60,60],#[x_s,x_end,y_s,y_end]
                  margin=5,p=0.5,homogeneity_threshold=5,label_class=1,print_out=False):
 
-        self.paths = [file.path for file in os.scandir(defect_png_dir) if file.name.split(".")[-1] == 'png']
+        # self.paths = [file.path for file in os.scandir(defect_png_dir) if file.name.split(".")[-1] == 'png']
+        self.paths, self.path_qty = self.get_paths(defect_png_source, img_ext='png')
         # qty_n = len(paths_noise)
         # msg = "Perlin noise image qty:{}".format(qty_n)
         # say_sth(msg, print_out=print_out)
@@ -415,13 +416,21 @@ class RandomVividDefect():
         self.print_out = print_out
 
     def img_png_process(self,img_p):
+        # print("rdm_horizon_flip")
         img_p = rdm_horizon_flip(img_p, p=self.p)
+        # print("rdm_vertical_flip")
         img_p = rdm_vertical_flip(img_p, p=self.p)
+        # print("rdm_contrast")
         img_p = rdm_contrast(img_p, self.ct_ratio, p=self.p, print_out=self.print_out)
+        # print("rdm_blur")
         img_p = rdm_blur(img_p, self.kernel_list, p=self.p, print_out=self.print_out)
+        # print("rdm_lower_brightness")
         img_p = rdm_lower_brightness(img_p, br_ratio=self.br_ratio, p=self.p, print_out=self.print_out)
+        # print("rdm_rotation")
         img_p = rdm_rotation(img_p, degrees=self.rot_degrees, p=self.p, print_out=self.print_out)
+        # print("rdm_resize")
         img_p = rdm_resize(img_p, resize_ratio=self.resize_ratio, p=self.p, print_out=self.print_out)
+
 
         return img_p
 
@@ -486,13 +495,41 @@ class RandomVividDefect():
 
             return status
 
+    def get_paths(self,img_source,img_ext=None):
+        # ----var
+        paths = list()
+
+        #----
+        if not isinstance(img_source, list):
+            img_source = [img_source]
+
+        #----
+        if img_ext is None:
+            img_ext = img_format
+        else:
+            img_ext = [img_ext]
+
+        for img_dir in img_source:
+            temp = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in img_ext]
+            if len(temp) == 0:
+                say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir))
+            else:
+                paths.extend(temp)
+
+        return np.array(paths),len(paths)
+
     def __call__(self, *args, **kwargs):
         img = kwargs.get('img')
         label = kwargs.get('label')
 
+        #----creat probabilities
+        probs = np.random.random(size=self.defect_num)
+        coors = np.where(probs >= (1 - self.p))
+        real_defect_num = len(coors[0])
+
         #---read defect images
         img_png_list = []
-        paths = np.random.choice(self.paths,self.defect_num,replace=False)
+        paths = np.random.choice(self.paths,real_defect_num,replace=False)
 
         for path in paths:
             img_bgra = np.fromfile(path, dtype=np.uint8)
@@ -502,6 +539,7 @@ class RandomVividDefect():
             # img_p = img_bgra.copy()
             # img_p = self.img_png_process(img_p)
             img_png_list.append(self.img_png_process(img_bgra))
+            # print("img_png_process ok")
 
         #-----start points
         h_ok, w_ok = img.shape[:-1]
@@ -520,23 +558,30 @@ class RandomVividDefect():
             count = 0
             go_flag = False
             while(go_flag is False):
+                #----break(因為有用到continue，所以要將break判斷放前面)
+                if count >= 100:
+                    # print("count break")
+                    break
 
                 #----get start points
                 w_start = np.random.randint(self.w_mar_zoom, w_ok_zoom_limit)
                 h_start = np.random.randint(self.h_mar_zoom, h_ok_zoom_limit)
 
+                #----calculate end points
                 w_end = w_start + w_de
                 h_end = h_start + h_de
 
                 #----overlap check
                 overlap_check = self.coors_overlap_check(h_start,h_end,w_start,w_end,coors_list,print_out=self.print_out)
                 if overlap_check is True:
+                    count += 1
                     continue
 
                 #----homogeneity check
                 roi = img[h_start:h_end, w_start:w_end, :]
                 homo_check = self.homogeneity_check(roi, homo_threshold=self.homo_threshold, print_out=self.print_out)
                 if homo_check is False:
+                    count += 1
                     continue
 
                 #----label roi class number check
@@ -544,9 +589,11 @@ class RandomVividDefect():
                     go_flag = True
                 else:
                     roi_label = label[h_start:h_end, w_start:w_end]
+                    #----label number check
                     label_overlap_check = self.label_overlap_check(roi_label)
 
                     if label_overlap_check:
+                        count += 1
                         if self.print_out:
                             print("label overlapped")
                         continue
@@ -589,23 +636,302 @@ class RandomVividDefect():
                     patch = cv2.add(roi,defect)
 
                     #----blur
-                    patch = cv2.GaussianBlur(patch, (3,3), 0, 0)
+                    blur_method = np.random.randint(0,2)
+                    patch = img_blur(patch, blur_method)
 
+                    #----image combination
                     img[h_start:h_end, w_start:w_end, :] = patch
                     coors_list.append([h_start,h_end,w_start,w_end])
                     if label is not None:
                         if self.label_class != 0:
                             # roi_label = np.zeros((h_de,w_de),dtype=np.uint8)
                             roi_label = mask.copy()
+                            #----blur
+                            roi_label = img_blur(roi_label, blur_method)
+                            roi_label = np.where(roi_label>127,255,0)
+                            #----
                             roi_label = np.where(roi_label == 255,self.label_class,0)
                             # roi_label[coors_label] = self.label_class
                             label[h_start:h_end, w_start:w_end] = roi_label
 
                 count += 1
-                #print("count:",count)
+                # print("count:",count)
 
-                if count >= 100:
+
+
+        if label is None:
+            return img
+        else:
+            return img,label
+
+class RandomVividLightDefect(RandomVividDefect):
+    def __init__(self,defect_num=5,rotation_degrees=20,resize_ratio=20,lower_br_ratio=20,
+                 ct_ratio=20,defect_png_source=r".\defects",zoom_in=[70,70,60,60],#[x_s,x_end,y_s,y_end]
+                 margin=5,p=0.5,homogeneity_threshold=5,label_class=1,print_out=False,
+                 defect_diff_value=4):
+
+        self.paths, self.path_qty = self.get_paths(defect_png_source, img_ext='png')
+
+
+        #----set local var to global
+        # self.area_range = area_range
+        self.w_mar_zoom = margin + zoom_in[0]
+        self.h_mar_zoom = margin + zoom_in[2]
+        self.ct_ratio = ct_ratio
+        self.defect_num = defect_num
+        self.br_ratio = lower_br_ratio
+        self.rot_degrees = rotation_degrees
+        self.resize_ratio = resize_ratio
+        self.margin = margin
+        self.p = p
+        self.zoom_in = zoom_in
+        self.label_class = label_class
+        self.kernel_list = [1,3,5,7]
+        self.homo_threshold = homogeneity_threshold
+        self.print_out = print_out
+        self.defect_diff_value = defect_diff_value
+
+    def img_png_process(self,img_p):
+        # print("rdm_horizon_flip")
+        img_p = rdm_horizon_flip(img_p, p=self.p)
+        # print("rdm_vertical_flip")
+        img_p = rdm_vertical_flip(img_p, p=self.p)
+        # print("rdm_contrast")
+        img_p = rdm_contrast(img_p, self.ct_ratio, p=self.p, print_out=self.print_out)
+        # print("rdm_blur")
+        img_p = rdm_blur(img_p, self.kernel_list, p=self.p, print_out=self.print_out)
+        # print("rdm_lower_brightness")
+        img_p = rdm_lower_brightness(img_p, br_ratio=self.br_ratio, p=self.p, print_out=self.print_out)
+        # print("rdm_rotation")
+        img_p = rdm_rotation(img_p, degrees=self.rot_degrees, p=self.p, print_out=self.print_out)
+        # print("rdm_resize")
+        img_p = rdm_resize(img_p, resize_ratio=self.resize_ratio, p=self.p, print_out=self.print_out)
+
+
+        return img_p
+
+    def homogeneity_check(self,roi,homo_threshold=1.0,print_out=False):
+        if print_out:
+            msg_list = []
+
+        if isinstance(homo_threshold, float) or isinstance(homo_threshold, int):
+            roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            std = np.std(roi_gray)
+
+            if std > homo_threshold:
+                status = False
+            else:
+                status = True
+
+            if print_out:
+                msg_list.append(f"The homogeneity of roi:{std}")
+        else:
+            status = True
+
+        if print_out:
+            for msg in msg_list:
+                print(msg)
+
+        return status
+
+    def coors_overlap_check(self,h_start,h_end,w_start,w_end,coors_list,print_out=False):
+        status = False
+        if print_out:
+            msg_list = []
+        #----
+        if len(coors_list) == 0:
+            status = False
+        else:
+            for coors in coors_list:
+                range_h = range(coors[0], coors[1])
+                range_w = range(coors[2], coors[3])
+                h_status = False
+                w_status = False
+                if h_start in range_h or h_end in range_h:
+                    h_status = True
+                if w_start in range_w or w_end in range_w:
+                    w_status = True
+
+                if h_status and w_status:
+                    status = True
+                    if print_out:
+                        msg_list.append("New coors are overlapped")
                     break
+                else:
+                    status = False
+
+        return status
+
+    def label_overlap_check(self,roi_label):
+            status = False
+
+            coors = np.where(roi_label > 0)
+            if len(coors[0]) > 0:
+                status = True
+
+            return status
+
+    def get_paths(self,img_source,img_ext=None):
+        # ----var
+        paths = list()
+
+        #----
+        if not isinstance(img_source, list):
+            img_source = [img_source]
+
+        #----
+        if img_ext is None:
+            img_ext = img_format
+        else:
+            img_ext = [img_ext]
+
+        for img_dir in img_source:
+            temp = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in img_ext]
+            if len(temp) == 0:
+                say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir))
+            else:
+                paths.extend(temp)
+
+        return np.array(paths),len(paths)
+
+    def get_the_most_pixel_value(self,img):
+
+        coors = np.where(img > 0)
+
+        unique_value_list = np.unique(img[coors])
+        qty_list = []
+        for value in unique_value_list:
+            coors = np.where(img == value)
+            qty_list.append(len(coors[0]))
+
+        sort_list = np.argsort(qty_list)
+
+        return unique_value_list[sort_list[-1]]
+
+
+
+
+    def __call__(self, *args, **kwargs):
+        img = kwargs.get('img')
+        label = kwargs.get('label')
+
+        #----creat probabilities
+        probs = np.random.random(size=self.defect_num)
+        coors = np.where(probs >= (1 - self.p))
+        real_defect_num = len(coors[0])
+
+        #---read defect images
+        img_png_list = []
+        paths = np.random.choice(self.paths,real_defect_num,replace=False)
+
+        for path in paths:
+            img_bgra = np.fromfile(path, dtype=np.uint8)
+            img_bgra = cv2.imdecode(img_bgra, -1)
+            img_png_list.append(self.img_png_process(img_bgra))
+            # print("img_png_process ok")
+
+        #-----start points
+        h_ok, w_ok = img.shape[:-1]
+
+        w_ok_zoom = w_ok - self.zoom_in[1]
+        h_ok_zoom = h_ok - self.zoom_in[3]
+        coors_list = []
+
+        #----defect paste process
+        for img_png in img_png_list:
+            img_de = img_png[:, :, :-1]
+            mask = img_png[:, :, -1]
+            h_de, w_de = img_png.shape[:-1]
+            w_ok_zoom_limit = w_ok_zoom - w_de
+            h_ok_zoom_limit = h_ok_zoom - h_de
+            count = 0
+            go_flag = False
+            while(go_flag is False):
+                #----break(因為有用到continue，所以要將break判斷放前面)
+                if count >= 100:
+                    # print("count break")
+                    break
+
+                #----get start points
+                w_start = np.random.randint(self.w_mar_zoom, w_ok_zoom_limit)
+                h_start = np.random.randint(self.h_mar_zoom, h_ok_zoom_limit)
+
+                #----calculate end points
+                w_end = w_start + w_de
+                h_end = h_start + h_de
+
+                #----overlap check
+                overlap_check = self.coors_overlap_check(h_start,h_end,w_start,w_end,coors_list,print_out=self.print_out)
+                if overlap_check is True:
+                    count += 1
+                    continue
+
+                #----homogeneity check
+                roi = img[h_start:h_end, w_start:w_end, :]
+                homo_check = self.homogeneity_check(roi, homo_threshold=self.homo_threshold, print_out=self.print_out)
+                if homo_check is False:
+                    count += 1
+                    continue
+
+                #----label roi class number check
+                if label is None:
+                    go_flag = True
+                else:
+                    roi_label = label[h_start:h_end, w_start:w_end]
+                    #----label number check
+                    label_overlap_check = self.label_overlap_check(roi_label)
+
+                    if label_overlap_check:
+                        count += 1
+                        if self.print_out:
+                            print("label overlapped")
+                        continue
+                    else:
+                        go_flag = True
+
+                #----img combination
+                if go_flag:
+                    #----get roi region
+                    not_mask = 255 - mask
+                    # max_value_roi = np.max(roi)
+                    roi = cv2.bitwise_and(roi, roi, mask=not_mask)
+                    defect = cv2.bitwise_and(img_de, img_de, mask=mask)
+                    #----light defect
+                    most_value_roi = self.get_the_most_pixel_value(cv2.cvtColor(roi,cv2.COLOR_BGR2GRAY))
+                    most_value_defect = self.get_the_most_pixel_value(cv2.cvtColor(defect,cv2.COLOR_BGR2GRAY))
+                    if self.print_out:
+                        print("most_value_roi:",most_value_roi)
+                        print("most_value_defect:",most_value_defect)
+
+                    defect = defect.astype(np.float32)
+                    defect = defect / most_value_defect * (most_value_roi - self.defect_diff_value)
+                    defect = cv2.convertScaleAbs(defect)
+
+                    patch = cv2.add(roi,defect)
+
+                    #----blur
+                    # blur_method = np.random.randint(0,2)
+                    # patch = img_blur(patch, blur_method)
+
+                    #----image combination
+                    img[h_start:h_end, w_start:w_end, :] = patch
+                    coors_list.append([h_start,h_end,w_start,w_end])
+                    if label is not None:
+                        if self.label_class != 0:
+                            # roi_label = np.zeros((h_de,w_de),dtype=np.uint8)
+                            # roi_label = mask.copy()
+                            # roi_label = mask
+                            #----blur
+                            # roi_label = img_blur(roi_label, blur_method)
+                            # roi_label = np.where(roi_label>127,255,0)
+                            #----
+                            # roi_label[coors_label] = self.label_class
+                            label[h_start:h_end, w_start:w_end] = np.where(mask == 255,self.label_class,0)
+
+                count += 1
+                # print("count:",count)
+
+
 
         if label is None:
             return img
@@ -793,8 +1119,13 @@ def rdm_blur(img_png, kernel_list, p=0.5, print_out=False):
 
         if np.random.randint(0, 2) == 0:
             img_png = cv2.blur(img_png, kernel)
+            mask = cv2.blur(mask, kernel)
+
         else:
             img_png = cv2.GaussianBlur(img_png, kernel, 0, 0)
+            mask = cv2.GaussianBlur(mask, kernel, 0, 0)
+
+        mask = np.where(mask > 127,255,0)
         img_png[:, :, -1] = mask
 
         if print_out:
@@ -805,11 +1136,18 @@ def rdm_blur(img_png, kernel_list, p=0.5, print_out=False):
 def rdm_lower_brightness(img_png, br_ratio=10, p=0.5, print_out=False):
     if np.random.random() >= (1 - p):
         mask = img_png[:, :, -1]
-        br = np.random.randint(-br_ratio, 0)
+        img_gray = cv2.cvtColor(img_png[:, :, :-1],cv2.COLOR_BGR2GRAY)
+        coors = np.where(mask == 255)
+        # mean = img_gray[coors].mean()
+        # std = img_gray[coors].std()
+        br = np.random.randint(-br_ratio, br_ratio)
+        beta = np.random.randint(-10,10)
         br = br / 100 + 1
 
-        img_png = cv2.convertScaleAbs(img_png, alpha=br)
+        img_png = cv2.convertScaleAbs(img_png, alpha=br,beta=beta)
         img_png[:, :, -1] = mask
+
+        # print(f"br = {br}, beta={beta}")
 
         if print_out:
             print("lower brightness:", br)
@@ -840,14 +1178,19 @@ def rdm_resize(img_png, resize_ratio=10, p=0.5, print_out=False):
     if np.random.random() >= (1 - p):
         mask = img_png[:, :, -1]
 
-        ratios = np.random.randint(-resize_ratio, resize_ratio)
+        ratios = np.random.randint(-resize_ratio, resize_ratio, 2)
         #         print(type(ratios))
-        ratios /= 100
-        ratios += 1
+        ratios = ratios / 100
+        ratios = ratios + 1
 
-        img_png = cv2.resize(img_png, None, fx=ratios, fy=ratios)
+        #----check h,w ratio
+        h,w = img_png.shape[:2]
+        h_w_ratio = h / w * 10
+        if h_w_ratio >= 9 and h_w_ratio <= 11:
+            ratios[1] = ratios[0]
 
-        mask = cv2.resize(mask, None, fx=ratios, fy=ratios, interpolation=cv2.INTER_NEAREST)
+        img_png = cv2.resize(img_png, None, fx=ratios[0], fy=ratios[1])
+        mask = cv2.resize(mask, None, fx=ratios[0], fy=ratios[1], interpolation=cv2.INTER_NEAREST)
 
         img_png[:, :, -1] = mask
 
@@ -898,6 +1241,14 @@ def img_room_in(img,zoom_in):
 
     return img
 
+def img_blur(img,blur_method=0,kernel=(3,3)):
+    if blur_method == 0:
+        img_blur = cv2.GaussianBlur(img, kernel, 0, 0)
+    else:
+        img_blur = cv2.blur(img, kernel)
+
+    return img_blur
+
 
 
 process_dict = dict(RandomBrightnessContrast=RandomBrightnessContrast,
@@ -908,6 +1259,7 @@ process_dict = dict(RandomBrightnessContrast=RandomBrightnessContrast,
                     RandomPNoise=RandomPNoise,
                     RandomDefect=RandomDefect,
                     RandomVividDefect=RandomVividDefect,
+                    RandomVividLightDefect=RandomVividLightDefect,
                     RandomRotation=RandomRotation,
                     Resize=Resize,
                     CvtColor=CvtColor,
