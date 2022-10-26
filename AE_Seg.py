@@ -12,14 +12,15 @@ else:
     import tensorflow.compat.v1.gfile as gfile
 print(tf.__version__)
 # sys.path.append(r'G:\我的雲端硬碟\Python\Code\Pycharm\utility')
-from AE_Seg_Util import tools,file_transfer,file_decode_v2,Seg_performance,get_classname_id_color,\
-    get_latest_json_content,dict_transform,tools_v2,DataLoader4Seg
+import AE_Seg_Util
+# from AE_Seg_Util import Seg_performance,get_classname_id_color,\
+#     get_latest_json_content,dict_transform,DataLoader4Seg
 
-
-from models_AE_Seg import AE_transpose_4layer,tf_mish,AE_JNet,AE_Resnet_Rot,AE_pooling_net,\
-    AE_Unet,Seg_DifNet,AE_Seg_pooling_net,preprocess,AE_pooling_net_V3,AE_pooling_net_V4,Seg_DifNet_V2,\
-    AE_pooling_net_V5,AE_dense_sampling,AE_pooling_net_V6,AE_pooling_net_V7,Seg_pooling_net_V4,Seg_pooling_net_V7,\
-    Seg_pooling_net_V8,Seg_pooling_net_V9,AE_pooling_net_V8,Seg_pooling_net_V10
+import models_AE_Seg
+# from models_AE_Seg import AE_transpose_4layer,tf_mish,AE_JNet,AE_Resnet_Rot,AE_pooling_net,\
+#     AE_Unet,Seg_DifNet,AE_Seg_pooling_net,preprocess,AE_pooling_net_V3,AE_pooling_net_V4,Seg_DifNet_V2,\
+#     AE_pooling_net_V5,AE_dense_sampling,AE_pooling_net_V6,AE_pooling_net_V7,Seg_pooling_net_V4,Seg_pooling_net_V7,\
+#     Seg_pooling_net_V8,Seg_pooling_net_V9,AE_pooling_net_V8,Seg_pooling_net_V10
 
 import config_mit
 from models_MiT import MixVisionTransformer,MiTDecoder
@@ -27,9 +28,177 @@ from models_MiT import MixVisionTransformer,MiTDecoder
 
 print_out = True
 SockConnected = False
-img_format = {"jpg", 'png', 'bmp', 'JPG','tif','TIF'}
+img_format = {'png','PNG','jpg','JPG','JPEG','jpeg','bmp','BMP'}
 
 #----functions
+def file_transfer(file_path, cut_num_range=100, random_num_range=87,header=[24, 97, 28, 98],save_name=None):
+    print_out = False
+    with open(file_path, 'rb') as f:
+        content = f.read()
+    # data reverse
+    content = content[::-1]
+
+    leng = len(content)
+    msg = "file length = ".format(leng)
+    #self.say_sth(msg,print_out=print_out)
+
+    cut_num = np.random.randint(10, cut_num_range)
+    msg = "cut_num = ".format(cut_num)
+    #self.say_sth(msg, print_out=print_out)
+
+    slice_num = math.ceil(leng / cut_num)
+    msg = "slice_num = ".format(slice_num)
+    #self.say_sth(msg, print_out=print_out)
+
+    compliment_num = slice_num * cut_num - leng
+    msg = "compliment_num = ".format(compliment_num)
+    #self.say_sth(msg, print_out=print_out)
+    compliment_data = np.random.randint(0, 128, compliment_num, dtype=np.uint8)
+
+    seq = [i for i in range(cut_num)]
+    np.random.shuffle(seq)
+    #print(seq)
+
+    header = np.array(header, dtype=np.uint8)
+    random_num = np.random.randint(0, 128, random_num_range, dtype=np.uint8)  # 根據數量製造假資料
+    msg = "bytes of header len = ".format(len(bytes(header)))
+    #self.say_sth(msg, print_out=print_out)
+    msg = "bytes of random_num len = ".format(len(bytes(random_num)))
+    #self.say_sth(msg, print_out=print_out)
+
+    # new_filename = os.path.join(os.path.dirname(file_path), 'encode_data.dat')
+    if save_name is None:
+        new_filename = file_path
+    else:
+        new_filename = save_name
+
+    with open(new_filename, 'wb') as f:
+        f.write(bytes(header))
+        f.write(bytes(random_num))
+        f.write(cut_num.to_bytes(4, byteorder='little', signed=False))
+        f.write(compliment_num.to_bytes(4, byteorder='little', signed=False))
+        f.write(bytes(seq))
+        add_complement = False
+        for i in seq:
+            #print("i = ", i)
+            num_start = slice_num * i
+            num_end = num_start + slice_num
+            if num_end > leng:
+                num_end = leng
+                add_complement = True
+                msg = "num_end over leng"
+                #self.say_sth(msg, print_out=print_out)
+            msg = "num_start = ".format(num_start)
+            # self.say_sth(msg, print_out=print_out)
+            msg = "num_end = ".format(num_end)
+            # self.say_sth(msg, print_out=print_out)
+
+            f.write(bytes(content[num_start:num_end]))
+            if add_complement is True:
+                f.write(bytes(compliment_data))
+                add_complement = False
+                msg = "add complement ok"
+                #self.say_sth(msg, print_out=print_out)
+    msg = "encode data is completed in {}".format(new_filename)
+    # self.say_sth(msg, print_out=print_out)
+
+def file_decode_v2(file_path, random_num_range=87,header = [24, 97, 28, 98],
+                   save_dir=None,return_value=False,to_save=True,print_f=None):
+    #----var
+    print_out = True
+    header_len = 4
+    decode_flag = True
+
+
+    if print_f is None:
+        print_f = print
+
+    #----read the file
+    with open(file_path, 'rb') as f:
+        content = f.read()
+
+    #----check headers
+    for i in range(4):
+        try:
+            # print(int(content[i]))
+            if int(content[i]) != header[i]:
+                decode_flag = False
+        except:
+            decode_flag = False
+    # msg = "decode_flag:{}".format(decode_flag)
+    # print_f(msg)
+
+    #----decode process
+    if decode_flag is False:
+        if return_value is True:
+            return None
+    else:
+        # print("execute decode")
+        leng = len(content)
+        #msg = "file length = {}".format(leng)
+        # say_sth(msg, print_out=print_out)
+        #print_f(msg)
+
+        cut_num_start = random_num_range + header_len
+        cut_num = int.from_bytes(content[cut_num_start:cut_num_start + 4], byteorder="little", signed=False)
+        #msg = "cut_num = {}".format(cut_num)
+        # say_sth(msg, print_out=print_out)
+        #print_f(msg)
+
+        compliment_num_start = cut_num_start + 4
+        compliment_num = int.from_bytes(content[compliment_num_start:compliment_num_start + 4], byteorder="little",
+                                        signed=False)
+        # msg = "compliment_num = {}".format(compliment_num)
+        # # say_sth(msg, print_out=print_out)
+        # print_f(msg)
+
+        seq_num_start = compliment_num_start + 4
+        seq = content[seq_num_start:seq_num_start + cut_num]
+
+        pb_fragment = content[seq_num_start + cut_num:]
+        leng = len(pb_fragment)
+        # msg = "pb_fragment size = {}".format(pb_fragment)
+        # say_sth(msg, print_out=print_out)
+
+        slice_num = math.ceil(leng / cut_num)
+        # msg = "slice_num = {}".format(slice_num)
+        # # say_sth(msg, print_out=print_out)
+        # print_f(msg)
+
+        seq2num = list()
+        for i in seq:
+            seq2num.append(int(i))
+        sort_seq = np.argsort(seq2num)
+
+        for num, i in enumerate(sort_seq):
+            num_start = slice_num * i
+            num_end = num_start + slice_num
+            if num == cut_num - 1:
+                num_end -= compliment_num
+                # print("subtract compliment")
+            # print("num_start = {}, num_end = {}".format(num_start, num_end))
+            if num == 0:
+                temp = pb_fragment[num_start:num_end]
+            else:
+                temp += pb_fragment[num_start:num_end]
+        temp = temp[::-1]  # data reverse
+
+        if to_save is True:
+            #----output filename
+            if save_dir is None:
+                new_filename = file_path
+            else:
+                new_filename = os.path.join(save_dir,file_path.split("\\")[-1])
+
+            #----save the file
+            with open(new_filename, 'wb') as f:
+                f.write(temp)
+            # msg = "decode data is completed in {}".format(new_filename)
+            # # say_sth(msg, print_out=print_out)
+            # print_f(msg)
+
+        if return_value is True:
+            return temp
 def say_sth(msg_source, print_out=False,header=None,delay=0.005):
     end = '\n'
     if isinstance(msg_source,str):
@@ -172,7 +341,7 @@ class AE_Seg():
 
         #----use previous settings
         if para_dict.get('use_previous_settings'):
-            dict_t = get_latest_json_content(para_dict['save_dir'])
+            dict_t = AE_Seg_Util.get_latest_json_content(para_dict['save_dir'])
             self.para_dict = None
             if isinstance(dict_t,dict):
                 msg_list = list()
@@ -206,7 +375,7 @@ class AE_Seg():
         to_train_seg = False
 
         # ----tools class init
-        tl = tools(print_out=print_out)
+        tl = AE_Seg_Util.tools(print_out=print_out)
 
         #----AE process
         ae_var = para_dict.get('ae_var')
@@ -298,14 +467,14 @@ class AE_Seg():
 
                         #----read class names
                         if isinstance(id2class_name,dict):
-                            id2class_name = dict_transform(id2class_name,set_key=True)
+                            id2class_name = AE_Seg_Util.dict_transform(id2class_name,set_key=True)
                             source = id2class_name
                         elif os.path.isfile(id2class_name):
                             source = id2class_name
                         else:
                             source = os.path.dirname(train_img_seg_dir[0])
 
-                        class_names, class_name2id, id2class_name, id2color,_ = get_classname_id_color(source, print_out=print_out)
+                        class_names, class_name2id, id2class_name, id2color,_ = AE_Seg_Util.get_classname_id_color(source, print_out=print_out)
 
                         class_num = len(class_names)
                         if class_num == 0:
@@ -402,7 +571,8 @@ class AE_Seg():
         if self.to_train_ae:
             ae_var = para_dict['ae_var']
             model_shape = ae_var.get('model_shape')  # [N,H,W,C]
-            infer_method = ae_var['infer_method']
+            infer_method = ae_var.get('infer_method')
+            model_name = ae_var.get('model_name')
             acti = ae_var['activation']
             pool_kernel = ae_var['pool_kernel']
             kernel_list = ae_var['kernel_list']
@@ -422,6 +592,7 @@ class AE_Seg():
         if self.to_train_seg:
             seg_var = para_dict['seg_var']
             infer_method4Seg = seg_var.get('infer_method')
+            model_name4seg = seg_var.get('model_name')
             pool_kernel4Seg = seg_var['pool_kernel']
             pool_type4Seg = seg_var.get('pool_type')
             kernel_list4Seg = seg_var['kernel_list']
@@ -452,7 +623,7 @@ class AE_Seg():
         # ct_ratio = 1
         pb_extension = 'pb'
         log_extension = 'json'
-        acti_dict = {'relu': tf.nn.relu, 'mish': tf_mish, None: tf.nn.relu}
+        acti_dict = {'relu': tf.nn.relu, 'mish': models_AE_Seg.tf_mish, None: tf.nn.relu}
         pb_save_list = list()
 
         #----var process
@@ -509,21 +680,21 @@ class AE_Seg():
                 if return_ori_data is True:
                     tf_input_ori_no_patch = tf.identity(self.tf_input_ori, name='tf_input_ori_no_patch')
             else:
-                tf_temp = preprocess(tf_input, preprocess_dict, print_out=print_out)
+                tf_temp = models_AE_Seg.preprocess(tf_input, preprocess_dict, print_out=print_out)
                 tf_input_process = tf.identity(tf_temp,name='preprocess')
 
                 if return_ori_data is True:
-                    tf_temp_2 = preprocess(self.tf_input_ori, preprocess_dict, print_out=print_out)
+                    tf_temp_2 = models_AE_Seg.preprocess(self.tf_input_ori, preprocess_dict, print_out=print_out)
                     tf_input_ori_no_patch = tf.identity(tf_temp_2, name='tf_input_ori_no_patch')
 
             # ----AIE model mapping
-            if infer_method.find("type_5") >= 0:
-                AIE_comm = infer_method
-                infer_method = "AE_pooling_net_V" + infer_method.split("_")[-1]
+            if model_name is not None:
+                if model_name.find("type_5") >= 0:
+                    infer_method = "AE_pooling_net_V" + model_name.split("_")[-1]
 
             #----AE inference selection
             if infer_method == "AE_transpose_4layer":
-                recon = AE_transpose_4layer(tf_input, kernel_list, filter_list,activation=acti_func,
+                recon = models_AE_Seg.AE_transpose_4layer(tf_input, kernel_list, filter_list,activation=acti_func,
                                                   pool_kernel=pool_kernel,pool_type=pool_type)
                 recon = tf.identity(recon, name='output_AE')
                 #(tf_input, kernel_list, filter_list,pool_kernel=2,activation=tf.nn.relu,pool_type=None)
@@ -549,57 +720,57 @@ class AE_Seg():
                 logits = mitDec(outs)
                 recon = tf.identity(logits, name='output_AE')
             elif infer_method == "AE_pooling_net_V3":
-                recon = AE_pooling_net_V3(tf_input_process, kernel_list, filter_list, activation=acti_func,
+                recon = models_AE_Seg.AE_pooling_net_V3(tf_input_process, kernel_list, filter_list, activation=acti_func,
                                           pool_kernel_list=pool_kernel, pool_type_list=pool_type,
                                           stride_list=stride_list, print_out=print_out)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_pooling_net_V4":
-                recon = AE_pooling_net_V4(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
+                recon = models_AE_Seg.AE_pooling_net_V4(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
                                           to_reduce=ae_var.get('to_reduce'),print_out=print_out)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_pooling_net_V5":
-                recon = AE_pooling_net_V5(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
+                recon = models_AE_Seg.AE_pooling_net_V5(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
                                           to_reduce=ae_var.get('to_reduce'),print_out=print_out)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_pooling_net_V6":
-                recon = AE_pooling_net_V6(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
+                recon = models_AE_Seg.AE_pooling_net_V6(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
                                           to_reduce=ae_var.get('to_reduce'),print_out=print_out)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_pooling_net_V7":
 
-                recon = AE_pooling_net_V7(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
+                recon = models_AE_Seg.AE_pooling_net_V7(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
                                          print_out=print_out)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_pooling_net_V8":
 
                 self.tf_input_standard = tf.placeholder(dtype, shape=model_shape, name='input_standard')
-                recon = AE_pooling_net_V8(tf_input_process,self.tf_input_standard,ae_var['encode_dict'],ae_var['decode_dict'],
+                recon = models_AE_Seg.AE_pooling_net_V8(tf_input_process,self.tf_input_standard,ae_var['encode_dict'],ae_var['decode_dict'],
                                          print_out=print_out)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_dense_sampling":
                 sampling_factor = 16
                 filters = 2
-                recon = AE_dense_sampling(tf_input_process,sampling_factor,filters)
+                recon = models_AE_Seg.AE_dense_sampling(tf_input_process,sampling_factor,filters)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_pooling_net":
 
-                recon = AE_pooling_net(tf_input_process, kernel_list, filter_list,activation=acti_func,
+                recon = models_AE_Seg.AE_pooling_net(tf_input_process, kernel_list, filter_list,activation=acti_func,
                                       pool_kernel_list=pool_kernel,pool_type_list=pool_type,
                                       stride_list=stride_list,rot=rot,print_out=print_out)
                 recon = tf.identity(recon,name='output_AE')
             elif infer_method == "AE_Seg_pooling_net":
-                AE_out,Seg_out = AE_Seg_pooling_net(tf_input, kernel_list, filter_list,activation=acti_func,
+                AE_out,Seg_out = models_AE_Seg.AE_Seg_pooling_net(tf_input, kernel_list, filter_list,activation=acti_func,
                                                   pool_kernel_list=pool_kernel,pool_type_list=pool_type,
                                        rot=rot,print_out=print_out,preprocess_dict=preprocess_dict,
                                            class_num=self.class_num)
                 recon = tf.identity(AE_out,name='output_AE')
             elif infer_method == "AE_Unet":
-                recon = AE_Unet(tf_input, kernel_list, filter_list,activation=acti_func,
+                recon = models_AE_Seg.AE_Unet(tf_input, kernel_list, filter_list,activation=acti_func,
                                                   pool_kernel_list=pool_kernel,pool_type_list=pool_type,
                                        rot=rot,print_out=print_out,preprocess_dict=preprocess_dict)
                 recon = tf.identity(recon,name='output_AE')
             elif infer_method == "AE_JNet":
-                recon = AE_JNet(tf_input, kernel_list, filter_list,activation=acti_func,
+                recon = models_AE_Seg.AE_JNet(tf_input, kernel_list, filter_list,activation=acti_func,
                                                 rot=rot,pool_kernel=pool_kernel,pool_type=pool_type)
             # elif infer_method == "test":
             #     recon = self.__AE_transpose_4layer_test(tf_input, kernel_list, filter_list,
@@ -610,10 +781,14 @@ class AE_Seg():
             #                                activation=acti_func,)
             elif infer_method == "Resnet_Rot":
                 filter_list = [12, 16, 24, 36, 48, 196]
-                recon = AE_Resnet_Rot(tf_input,filter_list,tf_keep_prob,embed_length,activation=acti_func,
+                recon = models_AE_Seg.AE_Resnet_Rot(tf_input,filter_list,tf_keep_prob,embed_length,activation=acti_func,
                                       print_out=True,rot=True)
             else:
-                say_sth(f"Error:AE model doesn't exist-->{AIE_comm}",print_out=True)
+                if model_name is not None:
+                    display_name = model_name
+                else:
+                    display_name = infer_method
+                say_sth(f"Error:AE model doesn't exist-->{display_name}", print_out=True)
 
             # ----AE loss method selection
             if loss_method == 'mse':
@@ -686,19 +861,20 @@ class AE_Seg():
                 filter_list4Seg = filter_list4Seg.astype(np.uint16)
 
             #----AIE model mapping
-            if infer_method4Seg.find("type_5") >= 0:
-                AIE_comm = infer_method4Seg
-                infer_method4Seg = "Seg_pooling_net_V" + infer_method4Seg.split("_")[-1]
+            if model_name4seg is not None:
+                if model_name4seg.find("type_5") >= 0:
+                    infer_method4Seg = "Seg_pooling_net_V" + model_name4seg.split("_")[-1]
 
+            #----Seg model selection
             if infer_method4Seg == "Seg_DifNet":
-                logits_Seg = Seg_DifNet(tf_input_process,tf_input_recon, kernel_list4Seg, filter_list4Seg,activation=acti_func,
+                logits_Seg = models_AE_Seg.Seg_DifNet(tf_input_process,tf_input_recon, kernel_list4Seg, filter_list4Seg,activation=acti_func,
                                    pool_kernel_list=pool_kernel4Seg,pool_type_list=pool_type4Seg,
                                    rot=rot4Seg,print_out=print_out,preprocess_dict=preprocess_dict4Seg,class_num=self.class_num)
                 softmax_Seg = tf.nn.softmax(logits_Seg,name='softmax_Seg')
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
                 prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
             elif infer_method4Seg == 'Seg_DifNet_V2':
-                logits_Seg = Seg_DifNet_V2(tf_input_process,tf_input_recon,seg_var['encode_dict'],seg_var['decode_dict'],
+                logits_Seg = models_AE_Seg.Seg_DifNet_V2(tf_input_process,tf_input_recon,seg_var['encode_dict'],seg_var['decode_dict'],
                               class_num=self.class_num,print_out=print_out)
                 softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
@@ -728,21 +904,21 @@ class AE_Seg():
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
                 prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
             elif infer_method4Seg == 'Seg_pooling_net_V4':
-                logits_Seg = Seg_pooling_net_V4(tf_input_process,tf_input_recon, seg_var['encode_dict'], seg_var['decode_dict'],
+                logits_Seg = models_AE_Seg.Seg_pooling_net_V4(tf_input_process,tf_input_recon, seg_var['encode_dict'], seg_var['decode_dict'],
                                           to_reduce=seg_var.get('to_reduce'),out_channel=self.class_num,
                                           print_out=print_out)
                 softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
                 prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
             elif infer_method4Seg == 'Seg_pooling_net_V7':
-                logits_Seg = Seg_pooling_net_V7(tf_input_process,tf_input_recon, seg_var['encode_dict'], seg_var['decode_dict'],
+                logits_Seg = models_AE_Seg.Seg_pooling_net_V7(tf_input_process,tf_input_recon, seg_var['encode_dict'], seg_var['decode_dict'],
                                           out_channel=self.class_num,
                                           print_out=print_out)
                 softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
                 prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
             elif infer_method4Seg == 'Seg_pooling_net_V8':
-                logits_Seg = Seg_pooling_net_V8(tf_input_process, tf_input_recon, seg_var['encode_dict'],
+                logits_Seg = models_AE_Seg.Seg_pooling_net_V8(tf_input_process, tf_input_recon, seg_var['encode_dict'],
                                                 seg_var['decode_dict'],
                                                 to_reduce=seg_var.get('to_reduce'), out_channel=self.class_num,
                                                 print_out=print_out)
@@ -750,7 +926,7 @@ class AE_Seg():
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
                 prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
             elif infer_method4Seg == 'Seg_pooling_net_V9':
-                logits_Seg = Seg_pooling_net_V9(tf_input_process, tf_input_recon, seg_var['encode_dict'],
+                logits_Seg = models_AE_Seg.Seg_pooling_net_V9(tf_input_process, tf_input_recon, seg_var['encode_dict'],
                                                 seg_var['decode_dict'],
                                                 to_reduce=seg_var.get('to_reduce'), out_channel=self.class_num,
                                                 print_out=print_out)
@@ -758,7 +934,7 @@ class AE_Seg():
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
                 prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
             elif infer_method4Seg == 'Seg_pooling_net_V10':
-                logits_Seg = Seg_pooling_net_V10(tf_input_process, tf_input_recon, seg_var['encode_dict'],
+                logits_Seg = models_AE_Seg.Seg_pooling_net_V10(tf_input_process, tf_input_recon, seg_var['encode_dict'],
                                                 seg_var['decode_dict'],
                                                 to_reduce=seg_var.get('to_reduce'), out_channel=self.class_num,
                                                 print_out=print_out)
@@ -771,7 +947,11 @@ class AE_Seg():
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
                 prediction_Seg = tf.cast(prediction_Seg,tf.uint8, name='predict_Seg')
             else:
-                say_sth(f"Error:Seg model doesn't exist-->{AIE_comm}",print_out=True)
+                if model_name4seg is not None:
+                    display_name = model_name4seg
+                else:
+                    display_name = infer_method4Seg
+                say_sth(f"Error:Seg model doesn't exist-->{display_name}", print_out=True)
 
             #----Seg loss method selection
             if loss_method4Seg == "cross_entropy":
@@ -979,7 +1159,7 @@ class AE_Seg():
 
         #----AE hyper-parameters
         if self.to_train_ae:
-            tl = tools()
+            tl = AE_Seg_Util.tools()
             # ----set target
             tl.set_target(target_dict)
             batch_size_test = batch_size
@@ -996,7 +1176,7 @@ class AE_Seg():
 
         #----SEG hyper-parameters
         if self.to_train_seg:
-            tl_seg = tools()
+            tl_seg = AE_Seg_Util.tools()
             tl_seg.class_name2id = self.class_name2id
             tl_seg.id2color = self.id2color
 
@@ -1012,14 +1192,14 @@ class AE_Seg():
 
 
             if self_create_label or train_with_aug_v2:
-                tl_seg_v2 = tools_v2(pipelines=seg_var['train_pipelines'],print_out=print_out)
+                tl_seg_v2 = AE_Seg_Util.tools_v2(pipelines=seg_var['train_pipelines'],print_out=print_out)
                 tl_seg_v2.class_name2id = self.class_name2id
                 tl_seg_v2.id2color = self.id2color
 
 
             titles = ['prediction', 'answer']
             batch_size_seg_test = batch_size_seg
-            seg_p = Seg_performance(len(self.class_name2id),print_out=print_out)
+            seg_p = AE_Seg_Util.Seg_performance(len(self.class_name2id),print_out=print_out)
 
             # ----check if the augmentation(image processing) is enabled
             if isinstance(process_seg_dict, dict):
@@ -1745,33 +1925,44 @@ class AE_Seg():
                             #----display training results
                             msg_list = list()
                             msg_list.append("\n----訓練週期 {} 與相關結果如下----".format(epoch))
-                            msg_list.append("Seg訓練集loss:{}".format(np.round(train_loss_seg, 4)))
-                            if self.test_img_dir is not None:
-                                msg_list.append("Seg驗證集loss:{}".format(np.round(test_loss_seg, 4)))
+                            # msg_list.append("Seg訓練集loss:{}".format(np.round(train_loss_seg, 4)))
+                            # if self.test_img_dir is not None:
+                            #     msg_list.append("Seg驗證集loss:{}".format(np.round(test_loss_seg, 4)))
 
                             # msg_list.append("此次訓練所花時間: {}秒".format(np.round(d_t, 2)))
                             # msg_list.append("累積訓練時間: {}秒".format(np.round(total_train_time, 2)))
                             say_sth(msg_list, print_out=print_out, header='msg')
 
-                            self.display_results(self.id2class_name,print_out,'訓練集',
-                                                 iou=train_iou_seg,acc=train_acc_seg,
-                                                 defect_recall=train_defect_recall,all_acc=train_all_acc_seg,
-                                                 defect_sensitivity=train_defect_sensitivity
+                            self.display_results(self.class_names,print_out,
+                                                 train_SEG_loss=train_loss_seg,
+                                                 train_SEG_iou=train_iou_seg,
+                                                 train_SEG_accuracy=train_acc_seg,
+                                                 train_SEG_defect_recall=train_defect_recall,
+                                                 train_SEG_defect_sensitivity=train_defect_sensitivity
                                                  )
-                            self.display_results(self.id2class_name, print_out, '驗證集',
-                                                 iou=test_iou_seg, acc=test_acc_seg,
-                                                 defect_recall=test_defect_recall, all_acc=test_all_acc_seg,
-                                                 defect_sensitivity=test_defect_sensitivity
+                            self.display_results(self.class_names,print_out,
+                                                 val_SEG_loss=test_loss_seg,
+                                                 val_SEG_iou=test_iou_seg,
+                                                 val_SEG_accuracy=test_acc_seg,
+                                                 val_SEG_defect_recall=test_defect_recall,
+                                                 val_SEG_defect_sensitivity=test_defect_sensitivity
                                                  )
-                            # self.display_iou_acc(train_iou_seg, train_acc_seg,train_defect_recall, train_all_acc_seg,
-                            #                      self.id2class_name,name='訓練集',print_out=print_out)
-                            # self.display_iou_acc(test_iou_seg, test_acc_seg,test_defect_recall, test_all_acc_seg,
-                            #                      self.id2class_name, name='驗證集', print_out=print_out)
 
                             #----send protocol data(for C++ to draw)
-                            msg_list, header_list = self.collect_data2ui(epoch, seg_train_result_dict,
-                                                                         seg_test_result_dict)
-                            say_sth(msg_list, print_out=print_out, header=header_list)
+                            self.transmit_data2ui(epoch,print_out,
+                                                  train_SEG_iou=train_iou_seg,
+                                                  train_SEG_accuracy=train_acc_seg,
+                                                  train_SEG_defect_recall=train_defect_recall,
+                                                  train_SEG_defect_sensitivity=train_defect_sensitivity,
+                                                  val_SEG_iou=test_iou_seg,
+                                                  val_SEG_accuracy=test_acc_seg,
+                                                  val_SEG_defect_recall=test_defect_recall,
+                                                  val_SEG_defect_sensitivity=test_defect_sensitivity
+                                                  )
+
+                            # msg_list, header_list = self.collect_data2ui(epoch, seg_train_result_dict,
+                            #                                              seg_test_result_dict)
+                            # say_sth(msg_list, print_out=print_out, header=header_list)
 
                             #----prediction for selected images
                             if self.seg_predict_qty > 0:
@@ -1786,51 +1977,38 @@ class AE_Seg():
                                                                                                self.model_shape[1:],
                                                                                                json_paths=None,
                                                                                                dtype=self.dtype)
-                                        recon = sess.run(self.recon,feed_dict={self.tf_input:batch_data})
-                                        predict_label = sess.run(self.tf_prediction_Seg,
+                                        predict_labels = sess.run(self.tf_prediction_Seg,
                                                                  feed_dict={self.tf_input: batch_data,
-                                                                            self.tf_input_recon:recon})
-                                        # predict_label = np.argmax(predict_label, axis=-1).astype(np.uint8)
+                                                                            self.tf_input_recon:batch_data})
 
                                         batch_data *= 255
-                                        batch_data = batch_data.astype(np.uint8)
+                                        for i in range(len(predict_labels)):
+                                            img_ori = cv2.convertScaleAbs(batch_data[i])
 
-                                        for i in range(len(predict_label)):
-                                            img = batch_data[i]
-                                            # label = batch_label[i]
-                                            # predict_label = predict_label[i]
+                                            #----image with prediction
+                                            img_predict = tl_seg.combine_img_label(img_ori,
+                                                                                   predict_labels[i],
+                                                                                   self.id2color)
+                                            show_imgs = [img_predict]
 
-                                            #----label to color
-                                            zeros = np.zeros_like(batch_data[i])
-                                            for label_num in np.unique(predict_label[i]):
-                                                if label_num != 0:
-                                                    # print(label_num)
-                                                    coors = np.where(predict_label[i] == label_num)
-                                                    try:
-                                                        zeros[coors] = self.id2color[label_num]
-                                                    except:
-                                                        print("error")
+                                            #----image with label
+                                            json_path = tl_seg.get_json_path_from_img_path(seg_paths[i])
+                                            seg_label = tl_seg.read_seg_label(json_path)
+                                            if seg_label is not None:
+                                                img_answer = tl_seg.combine_img_label(img_ori,
+                                                                                       seg_label,
+                                                                                       self.id2color)
+                                                show_imgs.append(img_answer)
 
-                                            predict_png = cv2.addWeighted(img, 0.5, zeros, 0.5, 0)
-                                            #----create answer png
-                                            path = self.seg_predict_paths[batch_size_seg_test * idx_seg + i]
-                                            ext = path.split(".")[-1]
-                                            json_path = path.strip(ext) + 'json'
-                                            show_imgs = [predict_png]
-                                            if os.path.exists(json_path):
-                                                answer_png = tl_seg.get_single_label_png(path, json_path)
-                                                show_imgs.append(answer_png)
                                             qty_show = len(show_imgs)
                                             plt.figure(num=1,figsize=(5*qty_show, 5*qty_show), clear=True)
 
-                                            for i, show_img in enumerate(show_imgs):
-                                                plt.subplot(1, qty_show, i + 1)
+                                            for k, show_img in enumerate(show_imgs):
+                                                plt.subplot(1, qty_show, k + 1)
                                                 plt.imshow(show_img)
                                                 plt.axis('off')
                                                 plt.title(titles[i])
-
-
-                                            save_path = os.path.join(self.new_predict_dir, path.split("\\")[-1])
+                                            save_path = os.path.join(self.new_predict_dir, seg_paths[i].split("\\")[-1])
                                             plt.savefig(save_path)
 
                             #----save ckpt
@@ -1958,72 +2136,6 @@ class AE_Seg():
         say_sth(msg, print_out=print_out)
 
         return qty_train
-
-    def config_check(self,config_dict):
-        #----var
-        must_list = ['train_img_dir', 'model_name', 'save_dir', 'epochs']
-        # must_list = ['train_img_dir', 'test_img_dir', 'save_dir', 'epochs']
-        must_flag = True
-        default_dict = {"model_shape":[None,192,192,3],
-                        'model_name':"type_1_0",
-                        'loss_method':'ssim',
-                        'activation':'relu',
-                        'save_pb_name':'inference',
-                        'opti_method':'adam',
-                        'pool_type':['max', 'ave'],
-                        'pool_kernel':[7, 2],
-                        'embed_length':144,
-                        'learning_rate':1e-4,
-                        'batch_size':8,
-                        'ratio':1.0,
-                        'aug_times':2,
-                        'hit_target_times':2,
-                        'eval_epochs':2,
-                        'save_period':2,
-                        'kernel_list':[7,5,3,3,3],
-                        'filter_list':[32,64,96,128,256],
-                        'conv_time':1,
-                        'rot':False,
-                        'scaler':1,
-                        #'preprocess_dict':{'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
-                        }
-
-
-        #----get the must list
-        if config_dict.get('must_list') is not None:
-            must_list = config_dict.get('must_list')
-        #----collect all keys of config_dict
-        config_key_list = list(config_dict.keys())
-
-        #----check the must list
-        if config_dict.get("J_mode") is not True:
-
-            #----check of must items
-            for item in must_list:
-                if not item in config_key_list:
-                    msg = "Error: could you plz give me parameters -> {}".format(item)
-                    say_sth(msg,print_out=print_out)
-                    if must_flag is True:
-                        must_flag = False
-
-        #----parameters parsing
-        if must_flag is True:
-            #----model name
-            if config_dict.get("J_mode") is not True:
-                infer_num = config_dict['model_name'].split("_")[-1]
-                if infer_num == '0':#
-                    config_dict['infer_method'] = "AE_pooling_net"
-                elif infer_num == '1':#
-                    config_dict['infer_method'] = "AE_Unet"
-                else:
-                    config_dict['infer_method'] = "AE_transpose_4layer"
-
-            #----optional parameters
-            for key,value in default_dict.items():
-                if not key in config_key_list:
-                    config_dict[key] = value
-
-        return must_flag,config_dict
 
     def __img_patch_diff_method(self,img_source_1, img_source_2, sess,diff_th=30, cc_th=30):
 
@@ -2219,24 +2331,70 @@ class AE_Seg():
 
         return msg_list,header_list
 
-    # def display_iou_acc(self,iou,acc,defect_recall,all_acc,id2name,name='',print_out=False):
-    def display_results(self,id2name,print_out,dataset_name,**kwargs):
-        msg_list = []
-        class_names = list(id2name.values())
-        #a_dict = {'iou':iou, 'acc':acc,'defect_recall':defect_recall}
-        for key,value_list in kwargs.items():
-            if key == 'all_acc':
-                msg_list.append("Seg{}_all_acc: {}".format(dataset_name,value_list))
+    def transmit_data2ui(self,epoch,print_out,**kwargs):
+        #----var
+        msg_list = list()
+        header_list = list()
+
+        for header,values in kwargs.items():
+            msg = ""
+            if isinstance(values,list) or isinstance(values,np.ndarray):
+                leng = len(values)
+                for i,value in enumerate(values):
+                    str_value = str(value)
+                    splits = str_value.split(".")
+
+                    if len(splits[-1]) > 8:
+                        msg += "{}.{}".format(splits[0],splits[-1][:8])
+                    else:
+                        msg += str_value
+
+
+
+                    # if value % 1.0 == 0:
+                    #     msg += str(value)
+                    # else:
+                    #     msg += "{:.8f}".format(value)
+
+                    if (i+1) < leng:
+                        msg += ','
+            elif isinstance(values,float):
+                msg = "{:.8f}".format(values)
             else:
-                msg_list.append("Seg{}_{}:".format(dataset_name,key))
+                msg = str(values)
+
+            msg_list.append('{},{}'.format(epoch, msg))
+            header_list.append(header)
+
+        say_sth(msg_list, print_out=print_out, header=header_list)
+
+
+    # def display_iou_acc(self,iou,acc,defect_recall,all_acc,id2name,name='',print_out=False):
+    # def display_results(self,id2name,print_out,dataset_name,**kwargs):
+    #     msg_list = []
+    #     class_names = list(id2name.values())
+    #     #a_dict = {'iou':iou, 'acc':acc,'defect_recall':defect_recall}
+    #     for key,value_list in kwargs.items():
+    #         if key == 'all_acc':
+    #             msg_list.append("Seg{}_all_acc: {}".format(dataset_name,value_list))
+    #         else:
+    #             msg_list.append("Seg{}_{}:".format(dataset_name,key))
+    #             msg_list.append("{}:".format(class_names))
+    #             msg_list.append("{}:".format(value_list))
+    #
+    #         # for i,value in enumerate(value_list):
+    #         #     msg_list.append(" {}: {}".format(id2name[i],value))
+    #
+    #
+    #
+    #     for msg in msg_list:
+    #         say_sth(msg,print_out=print_out)
+    def display_results(self,class_names,print_out,**kwargs):
+        msg_list = []
+        for key,value_list in kwargs.items():
+                msg_list.append(f"{key}:")
                 msg_list.append("{}:".format(class_names))
                 msg_list.append("{}:".format(value_list))
-
-            # for i,value in enumerate(value_list):
-            #     msg_list.append(" {}: {}".format(id2name[i],value))
-
-
-
         for msg in msg_list:
             say_sth(msg,print_out=print_out)
 
@@ -2344,7 +2502,7 @@ class AE_Seg_v2():
     def __init__(self,para_dict):
         #----use previous settings
         if para_dict.get('use_previous_settings'):
-            dict_t = get_latest_json_content(para_dict['save_dir'])
+            dict_t = AE_Seg_Util.get_latest_json_content(para_dict['save_dir'])
             self.para_dict = None
             if isinstance(dict_t,dict):
                 msg_list = list()
@@ -2378,7 +2536,7 @@ class AE_Seg_v2():
         to_train_seg = False
 
         # ----tools class init
-        tl = tools(print_out=print_out)
+        tl = AE_Seg_Util.tools(print_out=print_out)
 
         #----AE process
         ae_var = para_dict.get('ae_var')
@@ -2470,14 +2628,14 @@ class AE_Seg_v2():
 
                         #----read class names
                         if isinstance(id2class_name,dict):
-                            id2class_name = dict_transform(id2class_name,set_key=True)
+                            id2class_name = AE_Seg_Util.dict_transform(id2class_name,set_key=True)
                             source = id2class_name
                         elif os.path.isfile(id2class_name):
                             source = id2class_name
                         else:
                             source = os.path.dirname(train_img_seg_dir[0])
 
-                        class_names, class_name2id, id2class_name, id2color,_ = get_classname_id_color(source, print_out=print_out)
+                        class_names, class_name2id, id2class_name, id2color,_ = AE_Seg_Util.get_classname_id_color(source, print_out=print_out)
 
                         class_num = len(class_names)
                         if class_num == 0:
@@ -2624,7 +2782,7 @@ class AE_Seg_v2():
         # ct_ratio = 1
         pb_extension = 'pb'
         log_extension = 'json'
-        acti_dict = {'relu': tf.nn.relu, 'mish': tf_mish, None: tf.nn.relu}
+        acti_dict = {'relu': tf.nn.relu, 'mish': models_AE_Seg.tf_mish, None: tf.nn.relu}
         pb_save_list = list()
 
         #----var process
@@ -2682,17 +2840,17 @@ class AE_Seg_v2():
                     tf_input_ori_no_patch = tf.identity(self.tf_input_ori, name='tf_input_ori_no_patch')
 
             else:
-                tf_temp = preprocess(tf_input, preprocess_dict, print_out=print_out)
+                tf_temp = models_AE_Seg.preprocess(tf_input, preprocess_dict, print_out=print_out)
                 tf_input_process = tf.identity(tf_temp,name='preprocess')
 
                 if return_ori_data is True:
-                    tf_temp_2 = preprocess(self.tf_input_ori, preprocess_dict, print_out=print_out)
+                    tf_temp_2 = models_AE_Seg.preprocess(self.tf_input_ori, preprocess_dict, print_out=print_out)
                     tf_input_ori_no_patch = tf.identity(tf_temp_2, name='tf_input_ori_no_patch')
 
 
             #----AE inference selection
             if infer_method == "AE_transpose_4layer":
-                recon = AE_transpose_4layer(tf_input, kernel_list, filter_list,activation=acti_func,
+                recon = models_AE_Seg.AE_transpose_4layer(tf_input, kernel_list, filter_list,activation=acti_func,
                                                   pool_kernel=pool_kernel,pool_type=pool_type)
                 recon = tf.identity(recon, name='output_AE')
                 #(tf_input, kernel_list, filter_list,pool_kernel=2,activation=tf.nn.relu,pool_type=None)
@@ -2718,57 +2876,57 @@ class AE_Seg_v2():
                 logits = mitDec(outs)
                 recon = tf.identity(logits, name='output_AE')
             elif infer_method == "AE_pooling_net_V3":
-                recon = AE_pooling_net_V3(tf_input_process, kernel_list, filter_list, activation=acti_func,
+                recon = models_AE_Seg.AE_pooling_net_V3(tf_input_process, kernel_list, filter_list, activation=acti_func,
                                           pool_kernel_list=pool_kernel, pool_type_list=pool_type,
                                           stride_list=stride_list, print_out=print_out)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_pooling_net_V4":
-                recon = AE_pooling_net_V4(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
+                recon = models_AE_Seg.AE_pooling_net_V4(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
                                           to_reduce=ae_var.get('to_reduce'),print_out=print_out)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_pooling_net_V5":
-                recon = AE_pooling_net_V5(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
+                recon = models_AE_Seg.AE_pooling_net_V5(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
                                           to_reduce=ae_var.get('to_reduce'),print_out=print_out)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_pooling_net_V6":
-                recon = AE_pooling_net_V6(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
+                recon = models_AE_Seg.AE_pooling_net_V6(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
                                           to_reduce=ae_var.get('to_reduce'),print_out=print_out)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_pooling_net_V7":
 
-                recon = AE_pooling_net_V7(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
+                recon = models_AE_Seg.AE_pooling_net_V7(tf_input_process,ae_var['encode_dict'],ae_var['decode_dict'],
                                          print_out=print_out)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_pooling_net_V8":
 
                 self.tf_input_standard = tf.placeholder(dtype, shape=model_shape, name='input_standard')
-                recon = AE_pooling_net_V8(tf_input_process,self.tf_input_standard,ae_var['encode_dict'],ae_var['decode_dict'],
+                recon = models_AE_Seg.AE_pooling_net_V8(tf_input_process,self.tf_input_standard,ae_var['encode_dict'],ae_var['decode_dict'],
                                          print_out=print_out)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_dense_sampling":
                 sampling_factor = 16
                 filters = 2
-                recon = AE_dense_sampling(tf_input_process,sampling_factor,filters)
+                recon = models_AE_Seg.AE_dense_sampling(tf_input_process,sampling_factor,filters)
                 recon = tf.identity(recon, name='output_AE')
             elif infer_method == "AE_pooling_net":
 
-                recon = AE_pooling_net(tf_input_process, kernel_list, filter_list,activation=acti_func,
+                recon = models_AE_Seg.AE_pooling_net(tf_input_process, kernel_list, filter_list,activation=acti_func,
                                       pool_kernel_list=pool_kernel,pool_type_list=pool_type,
                                       stride_list=stride_list,rot=rot,print_out=print_out)
                 recon = tf.identity(recon,name='output_AE')
             elif infer_method == "AE_Seg_pooling_net":
-                AE_out,Seg_out = AE_Seg_pooling_net(tf_input, kernel_list, filter_list,activation=acti_func,
+                AE_out,Seg_out = models_AE_Seg.AE_Seg_pooling_net(tf_input, kernel_list, filter_list,activation=acti_func,
                                                   pool_kernel_list=pool_kernel,pool_type_list=pool_type,
                                        rot=rot,print_out=print_out,preprocess_dict=preprocess_dict,
                                            class_num=self.class_num)
                 recon = tf.identity(AE_out,name='output_AE')
             elif infer_method == "AE_Unet":
-                recon = AE_Unet(tf_input, kernel_list, filter_list,activation=acti_func,
+                recon = models_AE_Seg.AE_Unet(tf_input, kernel_list, filter_list,activation=acti_func,
                                                   pool_kernel_list=pool_kernel,pool_type_list=pool_type,
                                        rot=rot,print_out=print_out,preprocess_dict=preprocess_dict)
                 recon = tf.identity(recon,name='output_AE')
             elif infer_method == "AE_JNet":
-                recon = AE_JNet(tf_input, kernel_list, filter_list,activation=acti_func,
+                recon = models_AE_Seg.AE_JNet(tf_input, kernel_list, filter_list,activation=acti_func,
                                                 rot=rot,pool_kernel=pool_kernel,pool_type=pool_type)
             # elif infer_method == "test":
             #     recon = self.__AE_transpose_4layer_test(tf_input, kernel_list, filter_list,
@@ -2779,7 +2937,7 @@ class AE_Seg_v2():
             #                                activation=acti_func,)
             elif infer_method == "Resnet_Rot":
                 filter_list = [12, 16, 24, 36, 48, 196]
-                recon = AE_Resnet_Rot(tf_input,filter_list,tf_keep_prob,embed_length,activation=acti_func,
+                recon = models_AE_Seg.AE_Resnet_Rot(tf_input,filter_list,tf_keep_prob,embed_length,activation=acti_func,
                                       print_out=True,rot=True)
 
             # ----AE loss method selection
@@ -2853,14 +3011,14 @@ class AE_Seg_v2():
                 filter_list4Seg = filter_list4Seg.astype(np.uint16)
 
             if infer_method4Seg == "Seg_DifNet":
-                logits_Seg = Seg_DifNet(tf_input_process,tf_input_recon, kernel_list4Seg, filter_list4Seg,activation=acti_func,
+                logits_Seg = models_AE_Seg.Seg_DifNet(tf_input_process,tf_input_recon, kernel_list4Seg, filter_list4Seg,activation=acti_func,
                                    pool_kernel_list=pool_kernel4Seg,pool_type_list=pool_type4Seg,
                                    rot=rot4Seg,print_out=print_out,preprocess_dict=preprocess_dict4Seg,class_num=self.class_num)
                 softmax_Seg = tf.nn.softmax(logits_Seg,name='softmax_Seg')
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
                 prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
             elif infer_method4Seg == 'Seg_DifNet_V2':
-                logits_Seg = Seg_DifNet_V2(tf_input_process,tf_input_recon,seg_var['encode_dict'],seg_var['decode_dict'],
+                logits_Seg = models_AE_Seg.Seg_DifNet_V2(tf_input_process,tf_input_recon,seg_var['encode_dict'],seg_var['decode_dict'],
                               class_num=self.class_num,print_out=print_out)
                 softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
@@ -2890,21 +3048,21 @@ class AE_Seg_v2():
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
                 prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
             elif infer_method4Seg == 'Seg_pooling_net_V4':
-                logits_Seg = Seg_pooling_net_V4(tf_input_process,tf_input_recon, seg_var['encode_dict'], seg_var['decode_dict'],
+                logits_Seg = models_AE_Seg.Seg_pooling_net_V4(tf_input_process,tf_input_recon, seg_var['encode_dict'], seg_var['decode_dict'],
                                           to_reduce=seg_var.get('to_reduce'),out_channel=self.class_num,
                                           print_out=print_out)
                 softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
                 prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
             elif infer_method4Seg == 'Seg_pooling_net_V7':
-                logits_Seg = Seg_pooling_net_V7(tf_input_process,tf_input_recon, seg_var['encode_dict'], seg_var['decode_dict'],
+                logits_Seg = models_AE_Seg.Seg_pooling_net_V7(tf_input_process,tf_input_recon, seg_var['encode_dict'], seg_var['decode_dict'],
                                           out_channel=self.class_num,
                                           print_out=print_out)
                 softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
                 prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
             elif infer_method4Seg == 'Seg_pooling_net_V8':
-                logits_Seg = Seg_pooling_net_V8(tf_input_process, tf_input_recon, seg_var['encode_dict'],
+                logits_Seg = models_AE_Seg.Seg_pooling_net_V8(tf_input_process, tf_input_recon, seg_var['encode_dict'],
                                                 seg_var['decode_dict'],
                                                 to_reduce=seg_var.get('to_reduce'), out_channel=self.class_num,
                                                 print_out=print_out)
@@ -2912,7 +3070,7 @@ class AE_Seg_v2():
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
                 prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
             elif infer_method4Seg == 'Seg_pooling_net_V9':
-                logits_Seg = Seg_pooling_net_V9(tf_input_process, tf_input_recon, seg_var['encode_dict'],
+                logits_Seg = models_AE_Seg.Seg_pooling_net_V9(tf_input_process, tf_input_recon, seg_var['encode_dict'],
                                                 seg_var['decode_dict'],
                                                 to_reduce=seg_var.get('to_reduce'), out_channel=self.class_num,
                                                 print_out=print_out)
@@ -3131,7 +3289,7 @@ class AE_Seg_v2():
 
         #----AE hyper-parameters
         if self.to_train_ae:
-            tl = tools()
+            tl = AE_Seg_Util.tools()
             # ----set target
             tl.set_target(target_dict)
             batch_size_test = batch_size
@@ -3148,7 +3306,7 @@ class AE_Seg_v2():
 
         #----SEG hyper-parameters
         if self.to_train_seg:
-            tl_seg = tools()
+            tl_seg = AE_Seg_Util.tools()
             tl_seg.class_name2id = self.class_name2id
             tl_seg.id2color = self.id2color
             val_pipelines = [
@@ -3169,19 +3327,19 @@ class AE_Seg_v2():
 
 
             if self_create_label or train_with_aug_v2:
-                tl_seg_v2 = tools_v2(pipelines=seg_var['train_pipelines'],print_out=print_out)
+                tl_seg_v2 = AE_Seg_Util.tools_v2(pipelines=seg_var['train_pipelines'],print_out=print_out)
                 tl_seg_v2.class_name2id = self.class_name2id
                 tl_seg_v2.id2color = self.id2color
 
 
             titles = ['prediction', 'answer']
             batch_size_seg_test = batch_size_seg
-            seg_p = Seg_performance(len(self.class_name2id),print_out=print_out)
+            seg_p = AE_Seg_Util.Seg_performance(len(self.class_name2id),print_out=print_out)
 
-            dataloader = DataLoader4Seg(self.train_paths, batch_size=batch_size_seg,
+            dataloader = AE_Seg_Util.DataLoader4Seg(self.train_paths, batch_size=batch_size_seg,
                                         pipelines=seg_var['train_pipelines'],
                                         to_shuffle=True)
-            dataloader_val = DataLoader4Seg(self.test_paths, batch_size=batch_size_seg,
+            dataloader_val = AE_Seg_Util.DataLoader4Seg(self.test_paths, batch_size=batch_size_seg,
                                         pipelines=val_pipelines,
                                         to_shuffle=True)
             dataloader.get_classname_id_color(self.id2class_name, print_out=False)

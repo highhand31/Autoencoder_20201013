@@ -20,7 +20,7 @@ print("Tensorflow version of {}: {}".format(__file__,tf.__version__))
 print_out = True
 TCPConnected = False
 
-img_format = {'png','PNG','jpg','JPG','JPEG','bmp','BMP'}
+img_format = {'png','PNG','jpg','JPG','JPEG','jpeg','bmp','BMP','webp','tiff','TIFF'}
 
 
 class Seg_performance():
@@ -1054,8 +1054,31 @@ class tools():
             print("Warning: read failed {}".format(json_path))
             return None
 
+    def get_label_size(self,json_path):
+
+        # keys = [
+        #     "version",
+        #     "imageData",
+        #     "imagePath",
+        #     "shapes",  # polygonal annotations
+        #     "flags",  # image level flags
+        #     "imageHeight",
+        #     "imageWidth",
+        # ]
+
+        try:
+            with open(json_path, 'r',encoding='utf-8') as f:
+                data = json.load(f)
+                imageHeight = data.get('imageHeight')
+                imageWidth = data.get('imageWidth')
+            return imageHeight,imageWidth
+        except:
+            print("Warning: read failed {}".format(json_path))
+            return None
+
     def shapes_to_label(self,img_shape, shapes, label_name_to_value):
         dtype = np.uint8
+        label_name__list = list(label_name_to_value.keys())
 
         # if len(label_name_to_value) > 128:
         #     dtype = np.int16
@@ -1077,11 +1100,10 @@ class tools():
             # if instance not in instances:
             #     instances.append(instance)
             # ins_id = instances.index(instance) + 1
-            cls_id = label_name_to_value[label]
-
-
-            mask = self.shape_to_mask(img_shape[:2], points, shape_type)
-            cls[mask] = cls_id
+            if label in label_name__list:
+                cls_id = label_name_to_value[label]
+                mask = self.shape_to_mask(img_shape[:2], points, shape_type)
+                cls[mask] = cls_id
             # ins[mask] = ins_id
 
         return cls
@@ -1188,6 +1210,45 @@ class tools():
             save_img = cv2.addWeighted(img, 0.5, zeros, 0.5, 0)
 
         return save_img
+
+    def read_seg_label(self,json_path):
+        lbl = None
+
+        if not os.path.exists(json_path):
+            say_sth(f"json_path doesn't exist:{json_path}")
+        else:
+            label_shapes = self.get_label_shapes(json_path)
+            if label_shapes is None:
+                say_sth("label_shapes is None")
+            else:
+                h,w = self.get_label_size(json_path)
+                lbl = self.shapes_to_label(
+                    img_shape=(h,w,3),
+                    shapes=label_shapes,
+                    label_name_to_value=self.class_name2id,
+                )
+
+        return lbl
+
+    def get_json_path_from_img_path(self,img_path):
+        ext = img_path.split(".")[-1]
+
+        return img_path.strip(ext) + 'json'
+
+    def combine_img_label(self,img,label,id2color_dict):
+        #----resize label to be as same as img
+        h,w = img.shape[:2]
+        label = cv2.resize(label,(w,h),interpolation=cv2.cv2.INTER_NEAREST)
+        id_list = list(id2color_dict.keys())
+        re_img = img.copy()
+
+        for class_num in np.unique(label):
+            if class_num > 0:
+                if class_num in id_list:
+                    coors = np.where(label == class_num)
+                    re_img[coors] = id2color_dict[class_num]
+
+        return re_img
 
     def get_4D_img_label_data(self,paths,output_shape,json_paths=None,to_norm=True,to_rgb=True,to_process=False,
                               dtype='float32',to_save_label=False):
@@ -6267,14 +6328,28 @@ if __name__ == "__main__":
     # file_transfer(path)
 
     #----file decode
-    # path = r"D:\code\model_saver\AE_Seg_132\train_result_0.nst"
-    # file_decode_v2(path,random_num_range=10)
+    path = r"D:\code\model_saver\AE_Seg_149\train_result_5.nst"
+    file_decode_v2(path,random_num_range=10)
     # file_decode_v2(path)
 
-    #----tools
-    # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_矽電Label_Tidy_data\VRS_Json\OK\Json"
-    # t1 = tools(print_out=True)
-    # paths,json_paths,qty = t1.get_subdir_paths_withJsonCheck(img_dir)
+    #----tool
+    # t1 = tools(print_out=False)
+    # name_list = ['guava', 'strawberry', 'banana', 'apple', 'kiwi', 'mango', 'watermelon', 'pineapple']
+    # for name in name_list:
+    #     img_dir = r"D:\dataset\Fruit\{}\ori".format(name)
+    #
+    #     paths,json_paths,qty = t1.get_subdir_paths_withJsonCheck(img_dir)
+    #     print(f"水果名稱:{name},有標註的圖片數量:{qty}")
+    #     #
+    #     save_dir_list = [
+    #         os.path.join(os.path.dirname(img_dir),"train"),
+    #         os.path.join(os.path.dirname(img_dir),"val"),
+    #        ]
+    #     data_distribution(paths, save_dir_list, json_list=json_paths, ratio=0.8, select_num=None)
+        # break
+
+
+
     # rdms = np.random.randint(0,qty,5)
     # for rdm in rdms:
     #     print(paths[rdm])

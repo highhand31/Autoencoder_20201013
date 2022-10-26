@@ -140,8 +140,8 @@ def get_SEG_arg(**kwargs):
         # dict(type='RandomHorizontalFlip', p=p),
         # dict(type='RandomVerticalFlip', p=p),
         dict(type='RandomRotation', degrees=5, p=p),
-        dict(type='Resize', height=530,width=860),
-        dict(type='RandomCrop', height=512, width=832),
+        dict(type='Resize', height=144,width=144),
+        dict(type='RandomCrop', height=128, width=128),
         dict(type='Norm')
     ]
     # seg_var['id2class_name'] = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\classnames.txt"
@@ -154,7 +154,7 @@ def get_SEG_arg(**kwargs):
     # seg_var['predict_img_dir'] = [r'D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\predict_img']
     seg_var['to_train_w_AE_paths'] = False
     # seg_var['infer_method'] = "Seg_pooling_net_V10"#'Seg_pooling_net_V4'#'mit_b0'#'Seg_pooling_net_V4'#'Seg_DifNet'
-    seg_var['infer_method'] = "type_5_10"
+    seg_var['model_name'] = "type_5_10"
     seg_var['encode_dict'] = {
         "first_layer": {
             # "type": "dilated_downSampling",
@@ -269,7 +269,7 @@ if __name__ == "__main__":
     # recon_img_dir = r"D:\dataset\optotech\009IRC-FB\AE\recon4train"
     # recon_img_dir = r"D:\dataset\optotech\009IRC-FB\AE\recon4train_L4"
     recon_img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\recon_img"
-    model_shape = [None, 512, 832, 3]#[None, 512, 832, 3]
+    model_shape = [None, 128, 128, 3]#[None, 512, 832, 3]
 
 
     #----SEG args
@@ -302,7 +302,8 @@ if __name__ == "__main__":
     seg_dict['ok_img_seg_dir'] = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220901_AOI判定OK\OK(多區OK)\train"
 
     seg_dict['predict_img_dir'] = [
-      r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\defect_parts\小紅點_淺瑕疵\only_fig"
+      # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\defect_parts\小紅點_淺瑕疵\only_fig",
+        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\predict_img"
     ]
 
     seg_dict['id2class_name'] = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
@@ -314,7 +315,7 @@ if __name__ == "__main__":
 
     #----common var
     c_dict = dict(preprocess_dict = {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0},
-                  epochs=100,
+                  epochs=10,
                   GPU_ratio=None,
                   save_dir=r"D:\code\model_saver\AE_Seg_test",
                   to_fix_ae=True,
@@ -323,8 +324,6 @@ if __name__ == "__main__":
                   )
     # {'ct_ratio': 1.48497, 'bias': 0.25, 'br_ratio': 0.25098}
     # #default {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
-
-
 
 
     ae_var = get_AE_arg(train_img_dir=train_img_dir, test_img_dir=test_img_dir, recon_img_dir=recon_img_dir,
