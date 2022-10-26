@@ -1,5 +1,5 @@
 from AE_Seg import AE_Seg
-from AE_Seg import AE_Seg_v2
+# from AE_Seg import AE_Seg_v2
 
 def get_AE_arg(**kwargs):
     # name_list = ['train_img_dir','test_img_dir','recon_img_dir','model_shape']
@@ -315,10 +315,10 @@ if __name__ == "__main__":
 
     #----common var
     c_dict = dict(preprocess_dict = {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0},
-                  epochs=10,
+                  epochs=4,
                   GPU_ratio=None,
                   save_dir=r"D:\code\model_saver\AE_Seg_test",
-                  to_fix_ae=True,
+                  to_fix_ae=False,
                   to_fix_seg=False,
                   encript_flag=True,
                   )

@@ -710,15 +710,16 @@ class tools():
     def get_paths(self,img_source):
         # ----var
         paths = list()
-        if not isinstance(img_source, list):
-            img_source = [img_source]
+        if img_source is not None:
+            if not isinstance(img_source, list):
+                img_source = [img_source]
 
-        for img_dir in img_source:
-            temp = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in img_format]
-            if len(temp) == 0:
-                say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir))
-            else:
-                paths.extend(temp)
+            for img_dir in img_source:
+                temp = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in img_format]
+                if len(temp) == 0:
+                    say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir))
+                else:
+                    paths.extend(temp)
 
         return np.array(paths),len(paths)
 
