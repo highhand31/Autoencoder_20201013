@@ -2,6 +2,7 @@ from AE_Seg import AE_Seg
 # from AE_Seg import AE_Seg_v2
 
 def get_AE_arg(**kwargs):
+    p = 0.6
     # name_list = ['train_img_dir','test_img_dir','recon_img_dir','model_shape']
     # ----AE
     ae_var = dict()
@@ -42,30 +43,46 @@ def get_AE_arg(**kwargs):
     }
     ae_var['to_reduce'] = False
     ae_var['rot'] = False
-    ae_var['kernel_list'] = [7, 5, 5, 3, 3]
-    ae_var['filter_list'] = [16, 32, 48, 64, 128]
-    ae_var['conv_time'] = 1
-    ae_var['embed_length'] = 144
-    ae_var['scaler'] = 1
-    ae_var['pool_type'] = ['max','ave']  # ['max']
-    ae_var['pool_kernel'] = [7, 2]  # [7, 2]
+    # ae_var['kernel_list'] = [7, 5, 5, 3, 3]
+    # ae_var['filter_list'] = [16, 32, 48, 64, 128]
+    # ae_var['conv_time'] = 1
+    # ae_var['embed_length'] = 144
+    # ae_var['scaler'] = 1
+    # ae_var['pool_type'] = ['max','ave']  # ['max']
+    # ae_var['pool_kernel'] = [7, 2]  # [7, 2]
     ae_var['activation'] = 'relu'
     ae_var['loss_method'] = "ssim"
     ae_var['opti_method'] = "adam"
 
     # ====train
     rdm_patch = [0.1, 0.1, 10]  # rdm_patch:[margin_ratio,patch_ratio,size_min]
-    ae_var['ratio'] = 1.0
+    # ae_var['ratio'] = 1.0
     ae_var['batch_size'] = 2
-    ae_var['process_dict'] = {"rdm_flip": False, 'rdm_br_ct': True, 'rdm_blur': True,
-                              'rdm_angle': True, 'rdm_noise': False, 'rdm_shift': True,
-                              'rdm_patch': False, 'rdm_perlin':False, 'rdm_light_defect':False
-                              }
-    light_defect_dict = dict(area_range=[500, 1000], defect_num=3, pixel_range=[7, 12], zoom_in=60, p=0.8)
-    ae_var['setting_dict'] = {'rdm_shift': 0.05, 'rdm_angle': 3, 'rdm_patch': rdm_patch, 'rdm_br_ct':[0.05,0.1],
-                              'rdm_light_defect':light_defect_dict}
-    ae_var['aug_times'] = 2
-    ae_var['target'] = {'type': 'loss', 'value': 99.7, 'hit_target_times': 2}
+    # ae_var['process_dict'] = {"rdm_flip": False, 'rdm_br_ct': True, 'rdm_blur': True,
+    #                           'rdm_angle': True, 'rdm_noise': False, 'rdm_shift': True,
+    #                           'rdm_patch': False, 'rdm_perlin':False, 'rdm_light_defect':False
+    #                           }
+    # light_defect_dict = dict(area_range=[500, 1000], defect_num=3, pixel_range=[7, 12], zoom_in=60, p=0.8)
+    # ae_var['setting_dict'] = {'rdm_shift': 0.05, 'rdm_angle': 3, 'rdm_patch': rdm_patch, 'rdm_br_ct':[0.05,0.1],
+    #                           'rdm_light_defect':light_defect_dict}
+    ae_var['train_pipelines'] = [
+        dict(type='CvtColor', to_rgb=True),
+        dict(type='RandomBrightnessContrast', br_ratio=0.1, ct_ratio=0.3, p=p),
+        dict(type='RandomBlur', p=p),
+        # dict(type='RandomHorizontalFlip', p=p),
+        # dict(type='RandomVerticalFlip', p=p),
+        dict(type='RandomRotation', degrees=5, p=p),
+        dict(type='Resize', height=int(height * 1.05), width=int(width * 1.05)),
+        dict(type='RandomCrop', height=height, width=width),
+        dict(type='Norm')
+    ]
+    ae_var['val_pipelines'] = [
+        dict(type='CvtColor', to_rgb=True),
+        dict(type='Resize', height=height, width=width),
+        dict(type='Norm')
+    ]
+    # ae_var['aug_times'] = 2
+    ae_var['target'] = {'type': 'loss', 'value': 95, 'hit_target_times': 2}
 
     #----replace args
     for key,value in kwargs.items():
@@ -140,8 +157,13 @@ def get_SEG_arg(**kwargs):
         # dict(type='RandomHorizontalFlip', p=p),
         # dict(type='RandomVerticalFlip', p=p),
         dict(type='RandomRotation', degrees=5, p=p),
-        dict(type='Resize', height=144,width=144),
-        dict(type='RandomCrop', height=128, width=128),
+        dict(type='Resize', height=int(height*1.05), width=int(width*1.05)),
+        dict(type='RandomCrop', height=height, width=width),
+        dict(type='Norm')
+    ]
+    seg_var['val_pipelines'] = [
+        dict(type='CvtColor', to_rgb=True),
+        dict(type='Resize', height=height, width=width),
         dict(type='Norm')
     ]
     # seg_var['id2class_name'] = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\classnames.txt"
@@ -193,18 +215,18 @@ def get_SEG_arg(**kwargs):
     perlin_dict = dict(mode='num_range',area_range=[30,500],
                        defect_num=5,pixel_range=[180,250])
 
-    seg_var['process_dict'] = {"rdm_flip": False,
-                               'rdm_br_ct': False,
-                               'rdm_blur': True,
-                               'rdm_angle': True,
-                               'rdm_shift': True,
-                               'rdm_perlin':False
-                               }
-    seg_var['setting_dict'] = {'rdm_shift': 0.1,
-                               'rdm_angle': 5,
-                               'rdm_br_ct': [0.05, 0.05],
-                               'rdm_perlin':perlin_dict}
-    seg_var['aug_times'] = 2
+    # seg_var['process_dict'] = {"rdm_flip": False,
+    #                            'rdm_br_ct': False,
+    #                            'rdm_blur': True,
+    #                            'rdm_angle': True,
+    #                            'rdm_shift': True,
+    #                            'rdm_perlin':False
+    #                            }
+    # seg_var['setting_dict'] = {'rdm_shift': 0.1,
+    #                            'rdm_angle': 5,
+    #                            'rdm_br_ct': [0.05, 0.05],
+    #                            'rdm_perlin':perlin_dict}
+    # seg_var['aug_times'] = 2
     seg_var['target_of_best'] = 'recall+sensitivity'
     # seg_var['eval_epochs'] = 2
     # ----replace args
@@ -242,6 +264,8 @@ def get_commom_arg(**kwargs):
     return para_dict
 
 if __name__ == "__main__":
+    height = 128
+    width = 128
     #----AE args
     train_img_dir = [
         # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\training\L1_OK_無分類",
@@ -269,11 +293,13 @@ if __name__ == "__main__":
     # recon_img_dir = r"D:\dataset\optotech\009IRC-FB\AE\recon4train"
     # recon_img_dir = r"D:\dataset\optotech\009IRC-FB\AE\recon4train_L4"
     recon_img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\recon_img"
-    model_shape = [None, 128, 128, 3]#[None, 512, 832, 3]
+
 
 
     #----SEG args
     seg_dict = dict()
+    seg_dict['height'] = height
+    seg_dict['width'] = width
     seg_dict['train_img_seg_dir'] = [
         # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\Seg\train"
         # r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E01\02\train",
@@ -286,6 +312,7 @@ if __name__ == "__main__":
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\ok_parts_train",
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220527_比例更改的圖片\OK_train",
         r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220901_AOI判定OK\OK(多區OK)\num_100",
+        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220901_AOI判定OK\OK(多區OK)\train",
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train_one_defect_class",
 
     ]
@@ -299,7 +326,7 @@ if __name__ == "__main__":
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1\one_defect_class",
         # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2\one_defect_class"
     ]
-    seg_dict['ok_img_seg_dir'] = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220901_AOI判定OK\OK(多區OK)\train"
+    # seg_dict['ok_img_seg_dir'] =
 
     seg_dict['predict_img_dir'] = [
       # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\defect_parts\小紅點_淺瑕疵\only_fig",
@@ -314,20 +341,22 @@ if __name__ == "__main__":
     seg_dict['train_with_aug_v2'] = True
 
     #----common var
-    c_dict = dict(preprocess_dict = {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0},
-                  epochs=4,
-                  GPU_ratio=None,
-                  save_dir=r"D:\code\model_saver\AE_Seg_test",
-                  to_fix_ae=False,
-                  to_fix_seg=False,
-                  encript_flag=True,
+    c_dict = dict(
+        model_shape=[None, height, width, 3],  # [None, 512, 832, 3]
+        preprocess_dict = {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0},
+        epochs=4,
+        GPU_ratio=None,
+        save_dir=r"D:\code\model_saver\AE_Seg_test",
+        to_fix_ae=True,
+        to_fix_seg=False,
+        encript_flag=False,
                   )
     # {'ct_ratio': 1.48497, 'bias': 0.25, 'br_ratio': 0.25098}
     # #default {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
 
 
     ae_var = get_AE_arg(train_img_dir=train_img_dir, test_img_dir=test_img_dir, recon_img_dir=recon_img_dir,
-                        model_shape=model_shape)
+                        )
 
     seg_var = get_SEG_arg(**seg_dict)
 

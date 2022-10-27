@@ -24,12 +24,9 @@ img_format = {'png','PNG','jpg','JPG','JPEG','jpeg','bmp','BMP','webp','tiff','T
 
 
 class Seg_performance():
-    def __init__(self,num_classes,print_out=False):
-        self.num_classes = num_classes
-        self.reset_arg()
-        self.bins_num = num_classes + 1
+    def __init__(self,print_out=False):
         self.hist = np.histogram
-        self.bins = np.arange(self.bins_num)
+
         self.print_out = print_out
         self.epsilon = 1e-8
         self.iou = 0
@@ -687,6 +684,17 @@ class Seg_performance():
     def sum_defect_sensitivity(self):
         return np.sum(self.defect_sensitivity)
 
+    def set_classname_id_color(self,**kwargs):
+        self.class_names = kwargs.get('class_names')
+        self.class_name2id = kwargs.get('class_name2id')
+        self.id2class_name = kwargs.get('id2class_name')
+        self.id2color = kwargs.get('id2color')
+        self.num_classes = len(self.class_names)
+        self.bins_num = self.num_classes + 1
+        self.bins = np.arange(self.bins_num)
+
+        self.reset_arg()
+
 class tools():
     def __init__(self,print_out=False):
         self.p_dict = dict()
@@ -930,6 +938,12 @@ class tools():
                             print("set_target failed!!")
 
         self.t_compare = t_compare
+
+    def set_classname_id_color(self,**kwargs):
+        self.class_names = kwargs.get('class_names')
+        self.class_name2id = kwargs.get('class_name2id')
+        self.id2class_name = kwargs.get('id2class_name')
+        self.id2color = kwargs.get('id2color')
 
     def target_compare(self,data_dict):
         re = False
@@ -2287,6 +2301,12 @@ class tools_v2():
                             print("set_target failed!!")
 
         self.t_compare = t_compare
+
+    def set_classname_id_color(self,**kwargs):
+        self.class_names = kwargs.get('class_names')
+        self.class_name2id = kwargs.get('class_name2id')
+        self.id2class_name = kwargs.get('id2class_name')
+        self.id2color = kwargs.get('id2color')
 
     def target_compare(self, data_dict):
         re = False
@@ -3703,7 +3723,7 @@ class tf_utility(tools):
         return re_img
 
 class DataLoader4Seg():
-    def __init__(self,paths,batch_size=32,pipelines=None,to_shuffle=True,print_out=True):
+    def __init__(self,paths,only_img=False,batch_size=32,pipelines=None,to_shuffle=True,print_out=True):
         qty = len(paths)
         ites = math.ceil(qty / batch_size)
         if isinstance(paths,np.ndarray) is False:
@@ -3712,6 +3732,7 @@ class DataLoader4Seg():
         #     if isinstance(labels, np.ndarray) is False:
         #         labels = np.array(labels)
         self.qty = qty
+        self.only_img = only_img
         self.to_shuffle = to_shuffle
         self.batch_size = batch_size
         self.paths = paths
@@ -3767,18 +3788,22 @@ class DataLoader4Seg():
                 msg = "read failed:".format(path)
                 say_sth(msg,print_out=self.print_out)
             else:
-                lbl = self.get_label_image(path,img.shape)
-                # print("get lbl ok")
-                if len(self.transforms) > 0:
+                if self.only_img:
+                    for transform in self.transforms:
+                        img = transform(img=img)
+                else:
+                    lbl = self.get_label_image(path,img.shape)
                     for transform in self.transforms:
                         img, lbl = transform(img=img, label=lbl)
-                    # print("transform ok")
-
 
                 re_img.append(img)
-                re_label.append(lbl)
+                if self.only_img is False:
+                    re_label.append(lbl)
 
-        return np.array(re_img), np.array(re_label)
+        if self.only_img:
+            return np.array(re_img)
+        else:
+            return np.array(re_img), np.array(re_label)
 
     def get_label_image(self,img_path,img_shape):
         lbl = None
@@ -3855,8 +3880,15 @@ class DataLoader4Seg():
             print("Warning: read failed {}".format(json_path))
             return None
 
+    def set_classname_id_color(self,**kwargs):
+        self.class_names = kwargs.get('class_names')
+        self.class_name2id = kwargs.get('class_name2id')
+        self.id2class_name = kwargs.get('id2class_name')
+        self.id2color = kwargs.get('id2color')
+
     def shapes_to_label(self, img_shape, shapes, label_name_to_value):
         dtype = np.uint8
+        label_name_list = list(label_name_to_value.keys())
 
         # if len(label_name_to_value) > 128:
         #     dtype = np.int16
@@ -3878,10 +3910,10 @@ class DataLoader4Seg():
             # if instance not in instances:
             #     instances.append(instance)
             # ins_id = instances.index(instance) + 1
-            cls_id = label_name_to_value[label]
-
-            mask = self.shape_to_mask(img_shape[:2], points, shape_type)
-            cls[mask] = cls_id
+            if label in label_name_list:
+                cls_id = label_name_to_value[label]
+                mask = self.shape_to_mask(img_shape[:2], points, shape_type)
+                cls[mask] = cls_id
             # ins[mask] = ins_id
 
         return cls
@@ -4006,7 +4038,6 @@ class DataLoader4Seg():
         print(f"img dtype:{self.imgs.dtype}, label dtype:{self.labels.dtype}")
         print(f"image max value:",self.imgs.max())
 
-
     def __next__(self):
         self.ite_num += 1
         # print("ite_num:",self.ite_num)
@@ -4020,12 +4051,13 @@ class DataLoader4Seg():
             # print("num_end:",num_end)
 
             self.ite_paths = self.paths[num_start:num_end]
-            self.imgs,self.labels = self.get_batch_data(self.ite_paths)
-            # print("feed back")
 
-            # return self.paths[num_start:num_end]
-
-            return self.ite_paths, self.imgs, self.labels
+            if self.only_img:
+                self.imgs = self.get_batch_data(self.ite_paths)
+                return self.ite_paths, self.imgs
+            else:
+                self.imgs,self.labels = self.get_batch_data(self.ite_paths)
+                return self.ite_paths, self.imgs, self.labels
 
     # def __call__(self, *args, **kwargs):
     #     paths = self.__next__()
@@ -6013,7 +6045,7 @@ def data_distribution(img_list,save_dir_list,json_list=None,ratio=0.8,select_num
         #         new_path = os.path.join(save_dir_list[1],path.split('\\')[-1])
         #         shutil.copy(path,new_path)
 
-def draw_color_index(class_names,unit=60):
+def draw_color_index(class_names,unit=60,save_dir=None):
     # unit = 60
     gap = unit // 2
     qty = len(class_names)
@@ -6025,9 +6057,10 @@ def draw_color_index(class_names,unit=60):
     for idx, class_name in enumerate(class_names):
         s_point = (10, unit * 1 + idx * unit + gap * (idx + 1))
         e_point = (s_point[0] + unit * 5, s_point[1] + unit)
-        color = []
-        for v in colormap[idx]:
-            color.append(int(v))  # color數值範圍可以是int or float
+        color = colormap[idx].tolist()
+        # color = []
+        # for v in colormap[idx]:
+        #     color.append(int(v))  # color數值範圍可以是int or float
         # color = tuple(color)#color不一定要轉成tuple，使用list也可以
         # print(color)
         cv2.rectangle(img_index, s_point, e_point, color, -1)
@@ -6037,6 +6070,15 @@ def draw_color_index(class_names,unit=60):
         # ----add class name text
         cv2.putText(img_index, class_name, (e_point[0] + unit // 5, e_point[1] - unit // 3), cv2.FONT_HERSHEY_SIMPLEX,
                     1, (0, 0, 0), 2)
+
+    #----save
+    if save_dir is not None:
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        save_path = os.path.join(save_dir, 'label_index.jpg')
+        cv2.imwrite(save_path,img_index[:,:,::-1])
+
     return img_index
 
 def get_classname_id_color(source,print_out=False,save_dir=None):
@@ -6164,6 +6206,59 @@ def get_classname_id_color(source,print_out=False,save_dir=None):
 
 
     return class_names,class_name2id,id2class_name,id2color,img_index
+
+def get_classname_id_color_v2(source,print_out=False):
+    bk_name = "_background_"
+    exclude_name = "__ignore__"
+    msg_list = []
+    key_list = []
+    name_list = []
+    class_name2id = dict()
+    id2class_name = dict()
+    id2color = dict()
+
+    if isinstance(source, list):
+        key_list = source
+    elif isinstance(source, dict):
+        key_list = list(source.keys())
+    elif os.path.isfile(source):
+        with open(source, 'r') as f:
+            c = f.readlines()
+        for name in c:
+            key_list.append(name.strip())
+
+    if exclude_name in key_list:
+        key_list.remove(exclude_name)
+
+    if len(key_list) == 0:
+        say_sth("Error:沒有任何類別名稱")
+    else:
+        if not bk_name in key_list:
+            name_list.append(bk_name)
+        name_list.extend(key_list)
+        colormap = imgviz.label_colormap()
+
+        for i, name in enumerate(name_list):
+            color = colormap[i].tolist()
+            class_name2id[name] = i
+            id2class_name[i] = name
+            id2color[i] = color
+
+        if print_out:
+            msg_list.append("class_names:{}".format(name_list))
+            msg_list.append("class_name_to_id:{}".format(class_name2id))
+            for key, value in class_name2id.items():
+                msg_list.append("class name:{}, id:{}, color:{}".format(key, value, id2color[value]))
+
+            for msg in msg_list:
+                say_sth(msg, print_out=print_out)
+
+    return dict(
+        class_names=name_list,
+        class_name2id=class_name2id,
+        id2class_name=id2class_name,
+        id2color=id2color
+    )
 
 def dict_transform(ori_dict,set_key=False,set_value=False):
     new_dict = dict()
