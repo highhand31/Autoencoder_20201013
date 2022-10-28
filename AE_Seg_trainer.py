@@ -55,7 +55,7 @@ def get_AE_arg(**kwargs):
     ae_var['opti_method'] = "adam"
 
     # ====train
-    rdm_patch = [0.1, 0.1, 10]  # rdm_patch:[margin_ratio,patch_ratio,size_min]
+    # rdm_patch = [0.1, 0.1, 10]  # rdm_patch:[margin_ratio,patch_ratio,size_min]
     # ae_var['ratio'] = 1.0
     ae_var['batch_size'] = 2
     # ae_var['process_dict'] = {"rdm_flip": False, 'rdm_br_ct': True, 'rdm_blur': True,
@@ -212,8 +212,8 @@ def get_SEG_arg(**kwargs):
     seg_var['ratio'] = 1.0
     seg_var['batch_size'] = 2
 
-    perlin_dict = dict(mode='num_range',area_range=[30,500],
-                       defect_num=5,pixel_range=[180,250])
+    # perlin_dict = dict(mode='num_range',area_range=[30,500],
+    #                    defect_num=5,pixel_range=[180,250])
 
     # seg_var['process_dict'] = {"rdm_flip": False,
     #                            'rdm_br_ct': False,
@@ -241,7 +241,7 @@ def get_commom_arg(**kwargs):
     # {'ct_ratio': 1.48497, 'bias': 0.25, 'br_ratio': 0.25098}
     # #default {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
 
-    para_dict['show_data_qty'] = True
+    # para_dict['show_data_qty'] = True
     para_dict['learning_rate'] = 1e-4
     para_dict['epochs'] = 200
     # ----train
@@ -337,8 +337,8 @@ if __name__ == "__main__":
     # seg_dict['id2class_name'] = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames_one_defect_class.txt"
     # id2class_name = r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\Seg\classnames.txt"
     #r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\classnames.txt"
-    seg_dict['self_create_label'] = False
-    seg_dict['train_with_aug_v2'] = True
+    # seg_dict['self_create_label'] = False
+    # seg_dict['train_with_aug_v2'] = True
 
     #----common var
     c_dict = dict(

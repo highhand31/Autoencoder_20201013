@@ -389,6 +389,15 @@ def get_paths(img_source,ext=None):
 
     return np.array(paths),len(paths)
 
+def break_signal_check():
+    break_flag = False
+    if SockConnected:
+        if len(Sock.Message):
+            if Sock.Message[-1][:4] == "$S00":
+                break_flag = True
+
+    return break_flag
+
 
 
 
@@ -762,7 +771,7 @@ class AE_Seg():
             preprocess_dict4Seg = seg_var.get('preprocess_dict')
             rot4Seg = seg_var.get('rot')
             acti_seg = seg_var.get('activation')
-            class_num = len(self.classname_id_color_dict['class_names'])
+            self.class_num = len(self.classname_id_color_dict['class_names'])
 
             tf_input_recon = tf.placeholder(dtype, shape=model_shape, name='input_recon')
             tf_label_batch = tf.placeholder(tf.int32, shape=model_shape[:-1], name='label_batch')
@@ -919,6 +928,7 @@ class AE_Seg():
         self.saver = saver
         self.save_dir = save_dir
         self.pb_save_path = pb_save_path
+        self.encript_flag = encript_flag
 
 
 
@@ -967,22 +977,6 @@ class AE_Seg():
         to_fix_seg = para_dict.get('to_fix_seg')
         save_period = para_dict.get('save_period')
 
-        #----AE
-        if self.to_train_ae:
-            ae_var = para_dict['ae_var']
-
-        #----SEG
-        if self.to_train_seg:
-            seg_var = para_dict['seg_var']
-            ratio_seg = seg_var.get('ratio_seg')
-            process_seg_dict = seg_var.get('process_dict')
-            setting_seg_dict = seg_var.get('setting_dict')
-            aug_seg_times = seg_var.get('aug_times')
-            json_check = seg_var.get('json_check')
-            batch_size_seg = seg_var['batch_size']
-            self_create_label = seg_var.get('self_create_label')
-            train_with_aug_v2 = seg_var.get('train_with_aug_v2')
-
         if encode_header is None:
             encode_header = [24,97,28,98]
         if encode_num is None:
@@ -1000,22 +994,18 @@ class AE_Seg():
             record_value=0,
             record_value_seg=0
             )
-        train_loss_list = list()
-        seg_train_loss_list = list()
-        train_acc_list = list()
-        test_loss_list = list()
-        seg_test_loss_list = list()
-        test_acc_list = list()
+        self.train_loss_list = list()
+        self.seg_train_loss_list = list()
+        self.test_loss_list = list()
+        self.seg_test_loss_list = list()
 
-        img_quantity = 0
-        aug_enable = False
-        break_flag = False
+
         error_dict = {'GPU_resource_error': False}
-
         keep_prob = 0.7
 
         #----AE hyper-parameters
         if self.to_train_ae:
+            ae_var = para_dict['ae_var']
             self.set_target_AE(**ae_var.get('target'))
             dataloader_AE_train = AE_Seg_Util.DataLoader4Seg(self.train_paths,
                                                        only_img=True,
@@ -1032,8 +1022,7 @@ class AE_Seg():
 
         #----SEG hyper-parameters
         if self.to_train_seg:
-            # tl_seg = AE_Seg_Util.tools()
-            # tl_seg.set_classname_id_color(**self.classname_id_color_dict)
+            seg_var = para_dict['seg_var']
             class_names = self.classname_id_color_dict['class_names']
             dataloader_SEG_train = AE_Seg_Util.DataLoader4Seg(self.seg_train_paths,
                                                              only_img=False,
@@ -1057,547 +1046,319 @@ class AE_Seg():
                                                                 print_out=self.print_out)
                 dataloader_SEG_predict.set_classname_id_color(**self.classname_id_color_dict)
 
-
             dataloader_SEG_train.set_classname_id_color(**self.classname_id_color_dict)
             dataloader_SEG_val.set_classname_id_color(**self.classname_id_color_dict)
 
-
-
-            # if self_create_label or train_with_aug_v2:
-            #     tl_seg_v2 = AE_Seg_Util.tools_v2(pipelines=seg_var['train_pipelines'],print_out=print_out)
-            #     tl_seg_v2.set_classname_id_color(**self.classname_id_color_dict)
-
-
             titles = ['prediction', 'answer']
             # batch_size_seg_test = batch_size_seg
-            seg_p = AE_Seg_Util.Seg_performance(print_out=print_out)
-            seg_p.set_classname_id_color(**self.classname_id_color_dict)
-
-            # ----check if the augmentation(image processing) is enabled
-            # if isinstance(process_seg_dict, dict):
-            #     if True in process_seg_dict.values():
-            #         aug_seg_enable = True
-            #         tl_seg.set_process(process_seg_dict, setting_seg_dict)
-            #         if aug_seg_times is None:
-            #             aug_seg_times = 2
-            #         batch_size_seg = batch_size_seg // aug_seg_times  # the batch size must be integer!!
-            #         if batch_size_seg < 1:
-            #             batch_size_seg = 1
-
-        #----update content
-        # self.content = self.log_update(self.content, para_dict)
-
-
-
-        # ----calculate iterations of one epoch
-        # train_ites = math.ceil(img_quantity / batch_size)
-        # test_ites = math.ceil(len(self.test_paths) / batch_size)
+            self.seg_p = AE_Seg_Util.Seg_performance(print_out=print_out)
+            self.seg_p.set_classname_id_color(**self.classname_id_color_dict)
 
         self.set_time_start()
 
-
         #----GPU setting
         config = GPU_setting(GPU_ratio)
-        with tf.Session(config=config) as sess:
-            status = weights_check(sess, self.saver, self.save_dir, encript_flag=encript_flag,
-                                   encode_num=encode_num, encode_header=encode_header)
-            if status is False:
-                error_dict['GPU_resource_error'] = True
-            elif status is True:
+        self.sess = tf.Session(config=config)
+        # with tf.Session(config=config) as sess:
+        status = weights_check(self.sess, self.saver, self.save_dir, encript_flag=encript_flag,
+                               encode_num=encode_num, encode_header=encode_header)
+        if status is False:
+            error_dict['GPU_resource_error'] = True
+        elif status is True:
 
-                # ----epoch training
-                for epoch in range(epochs):
-                    # ----read manual cmd
-                    break_flag = self.read_manual_cmd(para_dict.get('to_read_manual_cmd'))
-                    # ----break the training
-                    if break_flag:
-                        break_flag = False
-                        break
+            # ----epoch training
+            for epoch in range(epochs):
+                # ----read manual cmd
+                break_flag = self.read_manual_cmd(para_dict.get('to_read_manual_cmd'))
+                # ----break the training
+                if break_flag:
+                    break_flag = False
+                    break
 
-                    # ----error check
-                    if True in list(error_dict.values()):
-                        break
-                    #----record the epoch start time
-                    self.set_epoch_start_time()
+                #----error check
+                if True in list(error_dict.values()):
+                    break
+                #----record the epoch start time
+                self.set_epoch_start_time()
 
-                    #----AE part
-                    if self.to_train_ae is True:
-                        if to_fix_ae is False:
-                            #----optimizations(AE train set)
-                            dataloader_AE_train.reset()
-                            for batch_paths, batch_data in dataloader_AE_train:
-                                feed_dict = {self.tf_input: batch_data, self.tf_keep_prob: keep_prob}
-                                # ----optimization
-                                try:
-                                    sess.run(self.opt_AE, feed_dict=feed_dict)
-                                except:
-                                    error_dict['GPU_resource_error'] = True
-                                    msg = "Error:權重最佳化時產生錯誤，可能GPU資源不夠導致"
-                                    say_sth(msg, print_out=print_out)
-                                    break
-
-                            #----evaluation(AE train set)
-                            train_loss = self.ae_eval_by_dataloader(sess, dataloader_AE_train)
-                            train_loss_list.append(float(train_loss))
-                            self.log["train_loss_list"] = train_loss_list
-
-                            #----evaluation(validation set)
-                            test_loss = self.ae_eval_by_dataloader(sess, dataloader_AE_val)
-                            test_loss_list.append(float(test_loss))
-                            self.log["test_loss_list"] = test_loss_list
-
-                            #----display training results
-                            msg = "\n----訓練週期 {} 與相關結果如下----".format(epoch)
-                            say_sth(msg, print_out=print_out)
-                            self.display_results(None, print_out,
-                                                 train_AE_loss=train_loss,
-                                                 val_AE_loss=test_loss,
-                                                 )
-
-                            #----send protocol data(for UI to draw)
-                            self.transmit_data2ui(epoch, print_out,
-                                                  train_AE_loss=train_loss,
-                                                  val_AE_loss=test_loss,
-                                                  )
-
-                            #----find the best performance
-                            self.performance_process_AE(epoch, test_loss, LV, sess, encript_flag)
-
-                            #----Check if stops the training
-                            goal = self.target_comparison_AE(test_loss,loss_method=self.loss_method)
-                            if goal is True:
+                #----AE part
+                if self.to_train_ae is True:
+                    if to_fix_ae is False:
+                        #----optimizations(AE train set)
+                        dataloader_AE_train.reset()
+                        for batch_paths, batch_data in dataloader_AE_train:
+                            #----check break signal from TCPIP
+                            break_flag = break_signal_check()
+                            if break_flag:
+                                self.save_ckpt_and_pb(epoch)
                                 break
 
-                            # ----test image reconstruction
-                            if self.recon_flag is True:
-                                # if (epoch + 1) % eval_epochs == 0 and train_loss > 0.80:
-                                if (epoch + 1) % eval_epochs == 0:
-                                    for filename in self.recon_paths:
-                                        test_img = self.__img_read(filename, self.model_shape[1:],dtype=self.dtype)
-                                        # if self.infer_method == 'AE_pooling_net_V8':
-                                        #     img_standard = tl.get_4D_data([img_standard_path] * len(test_img),
-                                        #                                   self.model_shape[1:], dtype=self.dtype)
-                                        #     feed_dict[self.tf_input_standard] = img_standard
-                                        # ----session run
-                                        feed_dict[self.tf_input] = test_img
-                                        img_sess_out = sess.run(self.recon, feed_dict=feed_dict)
-                                        # ----process of sess-out
-                                        img_sess_out = img_sess_out[0] * 255
-                                        img_sess_out = cv2.convertScaleAbs(img_sess_out)
-                                        if self.model_shape[3] == 1:
-                                            img_sess_out = np.reshape(img_sess_out, (self.model_shape[1], self.model_shape[2]))
-                                        else:
-                                            img_sess_out = cv2.cvtColor(img_sess_out, cv2.COLOR_RGB2BGR)
+                            feed_dict = {self.tf_input: batch_data, self.tf_keep_prob: keep_prob}
+                            # ----optimization
+                            try:
+                                self.sess.run(self.opt_AE, feed_dict=feed_dict)
+                            except:
+                                error_dict['GPU_resource_error'] = True
+                                msg = "Error:權重最佳化時產生錯誤，可能GPU資源不夠導致"
+                                say_sth(msg, print_out=print_out)
+                                break
 
-                                        # if loss_method != 'ssim':
-                                        #     img_sess_out = cv2.cvtColor(img_sess_out, cv2.COLOR_RGB2BGR)
+                        #----evaluation(AE train set)
+                        train_loss = self.ae_eval_by_dataloader(dataloader_AE_train,name='train')
 
-                                        # ----save recon image
-                                        splits = filename.split("\\")[-1]
-                                        new_filename = splits.split('.')[0] + '_sess-out.' + splits.split('.')[-1]
+                        #----evaluation(validation set)
+                        test_loss = self.ae_eval_by_dataloader(dataloader_AE_val,name='test')
 
-                                        new_filename = os.path.join(self.new_recon_dir, new_filename)
-                                        # cv2.imwrite(new_filename, img_sess_out)
-                                        cv2.imencode('.'+splits.split('.')[-1], img_sess_out)[1].tofile(new_filename)
-                                        # ----img diff method
-                                        img_diff = self.__img_diff_method(filename, img_sess_out, diff_th=15, cc_th=15)
-                                        img_diff = cv2.convertScaleAbs(img_diff)
-                                        new_filename = filename.split("\\")[-1]
-                                        new_filename = new_filename.split(".")[0] + '_diff.' + new_filename.split(".")[-1]
-                                        new_filename = os.path.join(self.new_recon_dir, new_filename)
-                                        # cv2.imwrite(new_filename, img_diff)
-                                        cv2.imencode('.' + splits.split('.')[-1], img_diff)[1].tofile(new_filename)
+                        #----display training results
+                        msg = "\n----訓練週期 {} 與相關結果如下----".format(epoch)
+                        say_sth(msg, print_out=print_out)
+                        self.display_results(None, print_out,
+                                             train_AE_loss=train_loss,
+                                             val_AE_loss=test_loss,
+                                             )
 
-                                        # ----img avepool diff method
-                                        img_diff = self.__img_patch_diff_method(filename, img_sess_out, sess, diff_th=30, cc_th=15)
-                                        img_diff = cv2.convertScaleAbs(img_diff)
-                                        new_filename = filename.split("\\")[-1]
-                                        new_filename = new_filename.split(".")[0] + '_avepool_diff.' + new_filename.split(".")[-1]
-                                        new_filename = os.path.join(self.new_recon_dir, new_filename)
-                                        # cv2.imwrite(new_filename, img_diff)
-                                        cv2.imencode('.' + splits.split('.')[-1], img_diff)[1].tofile(new_filename)
+                        #----send protocol data(for UI to draw)
+                        self.transmit_data2ui(epoch, print_out,
+                                              train_AE_loss=train_loss,
+                                              val_AE_loss=test_loss,
+                                              )
 
-                                        # ----SSIM method
-                                        # img_ssim = self.__ssim_method(filename, img_sess_out)
-                                        # img_ssim = cv2.convertScaleAbs(img_ssim)
-                                        # new_filename = filename.split("\\")[-1]
-                                        # new_filename = new_filename.split(".")[0] + '_ssim.' + new_filename.split(".")[-1]
-                                        # new_filename = os.path.join(self.new_recon_dir, new_filename)
-                                        # cv2.imwrite(new_filename, img_ssim)
+                        #----find the best performance
+                        self.performance_process_AE(epoch, test_loss, LV, self.sess, encript_flag)
 
-                    #----SEG part
-                    if self.to_train_seg is True:
-                        if to_fix_seg is False:
-                            # ----optimizations(SEG train set)
-                            dataloader_SEG_train.reset()
-                            for batch_paths, batch_data, batch_label in dataloader_SEG_train:
-                                feed_dict = {self.tf_input: batch_data, self.tf_input_recon: batch_data,
-                                             self.tf_label_batch: batch_label,
-                                             self.tf_keep_prob: keep_prob,
-                                             self.tf_dropout: 0.3}
-                                try:
-                                    sess.run(self.opt_Seg, feed_dict=feed_dict)
-                                except:
-                                    error_dict['GPU_resource_error'] = True
-                                    msg = "Error:SEG權重最佳化時產生錯誤，可能GPU資源不夠導致"
-                                    say_sth(msg, print_out=print_out)
-                                    break
+                        #----Check if stops the training
+                        goal = self.target_comparison_AE(test_loss,loss_method=self.loss_method)
+                        if goal is True:
+                            break
 
-                            #----evaluation(SEG train set)
-                            train_loss_seg = self.seg_eval_by_dataloader(sess, dataloader_SEG_train, seg_p)
+                        # ----test image reconstruction
+                        if self.recon_flag is True:
+                            # if (epoch + 1) % eval_epochs == 0 and train_loss > 0.80:
+                            if (epoch + 1) % eval_epochs == 0:
+                                for filename in self.recon_paths:
+                                    test_img = self.__img_read(filename, self.model_shape[1:],dtype=self.dtype)
+                                    # if self.infer_method == 'AE_pooling_net_V8':
+                                    #     img_standard = tl.get_4D_data([img_standard_path] * len(test_img),
+                                    #                                   self.model_shape[1:], dtype=self.dtype)
+                                    #     feed_dict[self.tf_input_standard] = img_standard
+                                    # ----session run
+                                    feed_dict[self.tf_input] = test_img
+                                    img_sess_out = self.sess.run(self.recon, feed_dict=feed_dict)
+                                    # ----process of sess-out
+                                    img_sess_out = img_sess_out[0] * 255
+                                    img_sess_out = cv2.convertScaleAbs(img_sess_out)
+                                    if self.model_shape[3] == 1:
+                                        img_sess_out = np.reshape(img_sess_out, (self.model_shape[1], self.model_shape[2]))
+                                    else:
+                                        img_sess_out = cv2.cvtColor(img_sess_out, cv2.COLOR_RGB2BGR)
 
-                            train_iou_seg, train_acc_seg, train_all_acc_seg = seg_p.cal_iou_acc(save_dict=self.log,
-                                                                                                name='train')
-                            train_defect_recall = seg_p.cal_defect_recall(save_dict=self.log, name='train')
-                            train_defect_sensitivity = seg_p.cal_defect_sensitivity(save_dict=self.log, name='train')
+                                    # if loss_method != 'ssim':
+                                    #     img_sess_out = cv2.cvtColor(img_sess_out, cv2.COLOR_RGB2BGR)
 
-                            #----evaluation(SEG val set)
-                            test_loss_seg = self.seg_eval_by_dataloader(sess, dataloader_SEG_val, seg_p)
+                                    # ----save recon image
+                                    splits = filename.split("\\")[-1]
+                                    new_filename = splits.split('.')[0] + '_sess-out.' + splits.split('.')[-1]
 
-                            test_iou_seg, test_acc_seg, test_all_acc_seg = seg_p.cal_iou_acc(save_dict=self.log,
-                                                                                             name='test')
-                            test_defect_recall = seg_p.cal_defect_recall(save_dict=self.log, name='test')
-                            test_defect_sensitivity = seg_p.cal_defect_sensitivity(save_dict=self.log, name='test')
+                                    new_filename = os.path.join(self.new_recon_dir, new_filename)
+                                    # cv2.imwrite(new_filename, img_sess_out)
+                                    cv2.imencode('.'+splits.split('.')[-1], img_sess_out)[1].tofile(new_filename)
+                                    # ----img diff method
+                                    img_diff = self.__img_diff_method(filename, img_sess_out, diff_th=15, cc_th=15)
+                                    img_diff = cv2.convertScaleAbs(img_diff)
+                                    new_filename = filename.split("\\")[-1]
+                                    new_filename = new_filename.split(".")[0] + '_diff.' + new_filename.split(".")[-1]
+                                    new_filename = os.path.join(self.new_recon_dir, new_filename)
+                                    # cv2.imwrite(new_filename, img_diff)
+                                    cv2.imencode('.' + splits.split('.')[-1], img_diff)[1].tofile(new_filename)
 
-                            #----save results in the log file
-                            seg_train_loss_list.append(float(train_loss_seg))
-                            seg_test_loss_list.append(float(test_loss_seg))
-                            self.log["seg_train_loss_list"] = seg_train_loss_list
-                            self.log["seg_test_loss_list"] = seg_test_loss_list
+                                    # ----img avepool diff method
+                                    img_diff = self.__img_patch_diff_method(filename, img_sess_out, self.sess, diff_th=30, cc_th=15)
+                                    img_diff = cv2.convertScaleAbs(img_diff)
+                                    new_filename = filename.split("\\")[-1]
+                                    new_filename = new_filename.split(".")[0] + '_avepool_diff.' + new_filename.split(".")[-1]
+                                    new_filename = os.path.join(self.new_recon_dir, new_filename)
+                                    # cv2.imwrite(new_filename, img_diff)
+                                    cv2.imencode('.' + splits.split('.')[-1], img_diff)[1].tofile(new_filename)
 
-                            #----find the best performance(SEG)
-                            new_value = self.get_value_from_performance(seg_p, seg_var.get('target_of_best'))
-                            self.performance_process(epoch, new_value, LV, sess, encript_flag)
+                                    # ----SSIM method
+                                    # img_ssim = self.__ssim_method(filename, img_sess_out)
+                                    # img_ssim = cv2.convertScaleAbs(img_ssim)
+                                    # new_filename = filename.split("\\")[-1]
+                                    # new_filename = new_filename.split(".")[0] + '_ssim.' + new_filename.split(".")[-1]
+                                    # new_filename = os.path.join(self.new_recon_dir, new_filename)
+                                    # cv2.imwrite(new_filename, img_ssim)
 
-                            # ----display training results
-                            msg = "\n----訓練週期 {} 與相關結果如下----".format(epoch)
-                            say_sth(msg, print_out=print_out)
+                #----SEG part
+                if self.to_train_seg is True:
+                    if to_fix_seg is False:
+                        # ----optimizations(SEG train set)
+                        dataloader_SEG_train.reset()
+                        for batch_paths, batch_data, batch_label in dataloader_SEG_train:
+                            # ----check break signal from TCPIP
+                            break_flag = break_signal_check()
+                            if break_flag:
+                                self.save_ckpt_and_pb(epoch)
+                                break
 
-                            self.display_results(class_names, print_out,
-                                                 train_SEG_loss=train_loss_seg,
-                                                 train_SEG_iou=train_iou_seg,
-                                                 train_SEG_accuracy=train_acc_seg,
-                                                 train_SEG_defect_recall=train_defect_recall,
-                                                 train_SEG_defect_sensitivity=train_defect_sensitivity
-                                                 )
-                            self.display_results(class_names, print_out,
-                                                 val_SEG_loss=test_loss_seg,
-                                                 val_SEG_iou=test_iou_seg,
-                                                 val_SEG_accuracy=test_acc_seg,
-                                                 val_SEG_defect_recall=test_defect_recall,
-                                                 val_SEG_defect_sensitivity=test_defect_sensitivity
-                                                 )
+                            feed_dict = {self.tf_input: batch_data, self.tf_input_recon: batch_data,
+                                         self.tf_label_batch: batch_label,
+                                         self.tf_keep_prob: keep_prob,
+                                         self.tf_dropout: 0.3}
+                            try:
+                                self.sess.run(self.opt_Seg, feed_dict=feed_dict)
+                            except:
+                                error_dict['GPU_resource_error'] = True
+                                msg = "Error:SEG權重最佳化時產生錯誤，可能GPU資源不夠導致"
+                                say_sth(msg, print_out=print_out)
+                                break
 
-                            # ----send protocol data(for UI to draw)
-                            self.transmit_data2ui(epoch, print_out,
-                                                  train_loss=train_loss_seg,
-                                                  train_SEG_iou=train_iou_seg,
-                                                  train_SEG_accuracy=train_acc_seg,
-                                                  train_SEG_defect_recall=train_defect_recall,
-                                                  train_SEG_defect_sensitivity=train_defect_sensitivity,
-                                                  val_loss=test_loss_seg,
-                                                  val_SEG_iou=test_iou_seg,
-                                                  val_SEG_accuracy=test_acc_seg,
-                                                  val_SEG_defect_recall=test_defect_recall,
-                                                  val_SEG_defect_sensitivity=test_defect_sensitivity
-                                                  )
+                        #----break the training(cancel all epochs)
+                        if break_flag:
+                            break_flag = False
+                            break
+                        if True in list(error_dict.values()):
+                            break
 
-                            # ----prediction for selected images
-                            if self.seg_predict_qty > 0:
-                                if (epoch + 1) % eval_epochs == 0:
-                                    for batch_paths, batch_data, batch_label in dataloader_SEG_predict:
-                                        predict_labels = sess.run(self.tf_prediction_Seg,
-                                                                  feed_dict={self.tf_input: batch_data,
-                                                                             self.tf_input_recon: batch_data})
-                                        batch_data *= 255
-                                        for i in range(len(predict_labels)):
-                                            img_ori = cv2.convertScaleAbs(batch_data[i])
+                        #----evaluation(SEG train set)
+                        train_loss_seg, train_iou_seg, train_acc_seg,train_defect_recall,train_defect_sensitivity = \
+                            self.seg_eval_by_dataloader(dataloader_SEG_train,name='train')
 
-                                            # ----image with prediction
-                                            img_predict = dataloader_SEG_predict.combine_img_label(
-                                                img_ori,
-                                                predict_labels[i],
-                                            )
+                        #----evaluation(SEG val set)
+                        test_loss_seg, test_iou_seg, test_acc_seg, test_defect_recall, test_defect_sensitivity = \
+                            self.seg_eval_by_dataloader(dataloader_SEG_val, name='test')
+                        # test_loss_seg = self.seg_eval_by_dataloader(self.sess, dataloader_SEG_val, seg_p)
+                        #
+                        # test_iou_seg, test_acc_seg, test_all_acc_seg = seg_p.cal_iou_acc(save_dict=self.log,
+                        #                                                                  name='test')
+                        # test_defect_recall = seg_p.cal_defect_recall(save_dict=self.log, name='test')
+                        # test_defect_sensitivity = seg_p.cal_defect_sensitivity(save_dict=self.log, name='test')
 
-                                            show_imgs = [img_predict]
+                        #----save results in the log file
+                        # seg_train_loss_list.append(float(train_loss_seg))
+                        # seg_test_loss_list.append(float(test_loss_seg))
+                        # self.log["seg_train_loss_list"] = seg_train_loss_list
+                        # self.log["seg_test_loss_list"] = seg_test_loss_list
 
-                                            # ----image with label
-                                            img_answer = dataloader_SEG_predict.combine_img_label(
-                                                img_ori,
-                                                batch_label[i],
-                                            )
+                        #----find the best performance(SEG)
+                        new_value = self.get_value_from_performance(seg_var.get('target_of_best'))
+                        self.performance_process_SEG(epoch, new_value, LV)
 
-                                            show_imgs.append(img_answer)
+                        # ----display training results
+                        msg = "\n----訓練週期 {} 與相關結果如下----".format(epoch)
+                        say_sth(msg, print_out=print_out)
+                        self.display_results(None,print_out,
+                                             train_SEG_loss=train_loss_seg,
+                                             val_SEG_loss=test_loss_seg,
+                                             )
 
-                                            qty_show = len(show_imgs)
-                                            plt.figure(num=1, figsize=(5 * qty_show, 5 * qty_show), clear=True)
+                        self.display_results(class_names, print_out,
+                                             train_SEG_iou=train_iou_seg,
+                                             val_SEG_iou=test_iou_seg,
+                                             train_SEG_accuracy=train_acc_seg,
+                                             val_SEG_accuracy=test_acc_seg,
+                                             train_SEG_defect_recall=train_defect_recall,
+                                             val_SEG_defect_recall=test_defect_recall,
+                                             train_SEG_defect_sensitivity=train_defect_sensitivity,
+                                             val_SEG_defect_sensitivity=test_defect_sensitivity
+                                             )
 
-                                            for k, show_img in enumerate(show_imgs):
-                                                plt.subplot(1, qty_show, k + 1)
-                                                plt.imshow(show_img)
-                                                plt.axis('off')
-                                                plt.title(titles[i])
-                                            save_path = os.path.join(self.new_predict_dir, batch_paths[i].split("\\")[-1])
-                                            plt.savefig(save_path)
+                        # ----send protocol data(for UI to draw)
+                        self.transmit_data2ui(epoch, print_out,
+                                              train_loss=train_loss_seg,
+                                              train_SEG_iou=train_iou_seg,
+                                              train_SEG_accuracy=train_acc_seg,
+                                              train_SEG_defect_recall=train_defect_recall,
+                                              train_SEG_defect_sensitivity=train_defect_sensitivity,
+                                              val_loss=test_loss_seg,
+                                              val_SEG_iou=test_iou_seg,
+                                              val_SEG_accuracy=test_acc_seg,
+                                              val_SEG_defect_recall=test_defect_recall,
+                                              val_SEG_defect_sensitivity=test_defect_sensitivity
+                                              )
 
+                        # ----prediction for selected images
+                        if self.seg_predict_qty > 0:
+                            if (epoch + 1) % eval_epochs == 0:
+                                for batch_paths, batch_data, batch_label in dataloader_SEG_predict:
+                                    predict_labels = self.sess.run(self.tf_prediction_Seg,
+                                                              feed_dict={self.tf_input: batch_data,
+                                                                         self.tf_input_recon: batch_data})
+                                    batch_data *= 255
+                                    for i in range(len(predict_labels)):
+                                        img_ori = cv2.convertScaleAbs(batch_data[i])
 
-                                    # for idx_seg in range(predict_ites_seg):
-                                    #     # ----get batch paths
-                                    #     seg_paths = tl_seg.get_ite_data(self.seg_predict_paths, idx_seg,
-                                    #                                     batch_size=batch_size_seg_test)
-                                    #
-                                    #     # ----get batch data
-                                    #     batch_data, batch_label = tl_seg.get_4D_img_label_data(seg_paths,
-                                    #                                                            self.model_shape[1:],
-                                    #                                                            json_paths=None,
-                                    #                                                            dtype=self.dtype)
-                                    #     predict_labels = sess.run(self.tf_prediction_Seg,
-                                    #                               feed_dict={self.tf_input: batch_data,
-                                    #                                          self.tf_input_recon: batch_data})
-                                    #     batch_data *= 255
-                                    #     for i in range(len(predict_labels)):
-                                    #         img_ori = cv2.convertScaleAbs(batch_data[i])
-                                    #
-                                    #         # ----image with prediction
-                                    #         img_predict = tl_seg.combine_img_label(img_ori,
-                                    #                                                predict_labels[i],
-                                    #                                                self.id2color)
-                                    #         show_imgs = [img_predict]
-                                    #
-                                    #         # ----image with label
-                                    #         json_path = tl_seg.get_json_path_from_img_path(seg_paths[i])
-                                    #         seg_label = tl_seg.read_seg_label(json_path)
-                                    #         if seg_label is not None:
-                                    #             img_answer = tl_seg.combine_img_label(img_ori,
-                                    #                                                   seg_label,
-                                    #                                                   self.id2color)
-                                    #             show_imgs.append(img_answer)
-                                    #
-                                    #         qty_show = len(show_imgs)
-                                    #         plt.figure(num=1, figsize=(5 * qty_show, 5 * qty_show), clear=True)
-                                    #
-                                    #         for k, show_img in enumerate(show_imgs):
-                                    #             plt.subplot(1, qty_show, k + 1)
-                                    #             plt.imshow(show_img)
-                                    #             plt.axis('off')
-                                    #             plt.title(titles[i])
-                                    #         save_path = os.path.join(self.new_predict_dir, seg_paths[i].split("\\")[-1])
-                                    #         plt.savefig(save_path)
+                                        # ----image with prediction
+                                        img_predict = dataloader_SEG_predict.combine_img_label(
+                                            img_ori,
+                                            predict_labels[i],
+                                        )
 
+                                        show_imgs = [img_predict]
 
-                            # for idx_seg in range(train_ites_seg):
-                            #     # ----command process
-                            #     break_flag = self.receive_msg_process(sess, epoch, encript_flag=encript_flag)
-                            #     if break_flag:
-                            #         break
-                            #
-                            #     # ----get image start and end numbers
-                            #     ori_seg_paths = tl_seg.get_ite_data(seg_train_paths_ori, idx_seg, batch_size=batch_size_seg)
-                            #     aug_seg_paths = tl_seg.get_ite_data(seg_train_paths_aug, idx_seg, batch_size=batch_size_seg)
-                            #     if json_check:
-                            #         ori_seg_json_paths = tl_seg.get_ite_data(seg_train_json_paths_ori, idx_seg,
-                            #                                                  batch_size=batch_size_seg)
-                            #         aug_seg_json_paths = tl_seg.get_ite_data(seg_train_json_paths_aug, idx_seg,
-                            #                                                  batch_size=batch_size_seg)
-                            #     else:
-                            #         ori_seg_json_paths = None
-                            #         aug_seg_json_paths = None
-                            #         # print("ori_seg_json_paths:",ori_seg_json_paths)
-                            #         # print("aug_seg_json_paths:",aug_seg_json_paths)
-                            #
-                            #     #----get 4-D data
-                            #     if aug_enable is True:
-                            #         if self_create_label:
-                            #             # ----ori data
-                            #             #(self,paths, output_shape,to_norm=True,to_rgb=True,to_process=False,dtype='float32')
-                            #             ori_data, ori_label = tl_seg.get_4D_data_create_mask(ori_seg_paths,
-                            #                                                                self.model_shape[1:],
-                            #                                                                to_norm=True, to_rgb=True,
-                            #                                                                to_process=False,
-                            #                                                                dtype=self.dtype)
-                            #
-                            #             # ----aug data
-                            #             # aug_data, aug_label = tl_seg.get_4D_data_create_mask(aug_seg_paths,
-                            #             #                                                    self.model_shape[1:],
-                            #             #                                                    to_norm=True,
-                            #             #                                                    to_rgb=True,
-                            #             #                                                    to_process=True,
-                            #             #                                                    dtype=self.dtype)
-                            #             aug_data, aug_label = tl_seg_v2.get_seg_batch_data(aug_seg_paths)
-                            #         else:
-                            #             # ----ori data
-                            #             ori_data,ori_label = tl_seg.get_4D_img_label_data(ori_seg_paths,self.model_shape[1:],
-                            #                                                               json_paths=ori_seg_json_paths,
-                            #                                                 to_norm=True, to_rgb=True,
-                            #                                                 to_process=False, dtype=self.dtype)
-                            #
-                            #             # ----aug data
-                            #             aug_data,aug_label = tl_seg.get_4D_img_label_data(aug_seg_paths,self.model_shape[1:],
-                            #                                                               json_paths=aug_seg_json_paths,
-                            #                                       to_norm=True,
-                            #                                       to_rgb=True,
-                            #                                       to_process=True,
-                            #                                       dtype=self.dtype)
-                            #             if train_with_aug_v2:
-                            #                 ok_batch_paths = np.random.choice(ok_img_seg_paths,batch_size_seg,replace=False)
-                            #                 aug_data_2, aug_label_2 = tl_seg_v2.get_seg_batch_data(ok_batch_paths)
-                            #                 # a_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\temp"
-                            #                 # temp_img = aug_data_2[0] * 255
-                            #                 # temp_img = cv2.convertScaleAbs(temp_img)
-                            #                 # save_path = ok_batch_paths[0].split("\\")[-1].split(".")[0]
-                            #                 # save_path += '.bmp'
-                            #                 # save_path = os.path.join(a_dir, save_path)
-                            #                 # cv2.imencode('.bmp', temp_img)[1].tofile(save_path)
-                            #
-                            #         #----data concat
-                            #         batch_data = np.concatenate([ori_data, aug_data], axis=0)
-                            #         batch_label = np.concatenate([ori_label, aug_label], axis=0)
-                            #         if train_with_aug_v2:
-                            #             batch_data = np.concatenate([batch_data, aug_data_2], axis=0)
-                            #             batch_label = np.concatenate([batch_label, aug_label_2], axis=0)
-                            #     else:
-                            #         if self_create_label:
-                            #             batch_data, batch_label = tl_seg.get_4D_data_create_mask(ori_seg_paths,
-                            #                                                                    self.model_shape[1:],
-                            #                                                                    dtype=self.dtype)
-                            #         else:
-                            #             batch_data,batch_label = tl_seg.get_4D_img_label_data(ori_seg_paths,self.model_shape[1:],
-                            #                                                         json_paths=ori_seg_json_paths,
-                            #                                                        dtype=self.dtype)
-                            #
-                            #
-                            #     feed_dict = {self.tf_input: batch_data,self.tf_input_recon:batch_data,
-                            #                  self.tf_label_batch: batch_label,
-                            #                  self.tf_keep_prob: keep_prob,
-                            #                  self.tf_dropout: 0.3}
-                            #
-                            #     #----session run
-                            #     try:
-                            #         sess.run(self.opt_Seg, feed_dict=feed_dict)
-                            #     except:
-                            #         error_dict['GPU_resource_error'] = True
-                            #         msg = "Error:SEG權重最佳化時產生錯誤，可能GPU資源不夠導致"
-                            #         say_sth(msg, print_out=print_out)
-                            #         break
-                            #
-                            #     #----evaluation(training set)
-                            #     feed_dict[self.tf_keep_prob] = 1.0
-                            #     feed_dict[self.tf_dropout] = 0.0
-                            #     # feed_dict[self.tf_phase_train] = False
-                            #
-                            #     loss_temp = sess.run(self.loss_Seg, feed_dict=feed_dict)
-                            #     predict_label = sess.run(self.prediction_Seg, feed_dict=feed_dict)
-                            #     # predict_label = np.argmax(predict_label,axis=-1).astype(np.uint8)
-                            #
-                            #     #----calculate the loss and accuracy
-                            #     train_loss_seg += loss_temp
-                            #     seg_p.cal_intersection_union(predict_label,batch_label)
-                            #     _ = seg_p.cal_label_defect_by_acc_v2(predict_label, batch_label)
-                            #     _ = seg_p.cal_predict_defect_by_acc_v2(predict_label, batch_label)
-                            #
-                            # train_loss_seg /= train_ites_seg
-                            # # seg_train_result_dict['loss'] = train_loss_seg
-                            # #----save results in the log file
-                            # seg_train_loss_list.append(float(train_loss_seg))
-                            # self.log["seg_train_loss_list"] = seg_train_loss_list
-                            # train_iou_seg, train_acc_seg, train_all_acc_seg = seg_p.cal_iou_acc(save_dict=self.log,name='train')
-                            # train_defect_recall = seg_p.cal_defect_recall(save_dict=self.log,name='train')
-                            # train_defect_sensitivity = seg_p.cal_defect_sensitivity(save_dict=self.log,name='train')
-                            # #print("iou:{}, acc:{}, all_acc:{}".format(iou, acc, all_acc))
-                            # #print("train_loss_seg:",train_loss_seg)
-                            #
-                            # #----evaluation(test set)
-                            # if self.seg_test_qty > 0:
-                            #     seg_p.reset_arg()
-                            #     seg_p.reset_defect_stat()
-                            #     for idx_seg in range(test_ites_seg):
-                            #         #----get batch paths
-                            #         seg_paths = tl_seg.get_ite_data(self.seg_test_paths, idx_seg,
-                            #                                             batch_size=batch_size_seg_test)
-                            #         if json_check:
-                            #             seg_json_paths = tl_seg.get_ite_data(self.seg_test_json_paths, idx_seg,
-                            #                                                      batch_size=batch_size_seg_test)
-                            #         else:
-                            #             seg_json_paths = None
-                            #         #----get batch data
-                            #         # if self_create_label:
-                            #         #     batch_data, batch_label = tl_seg.get_4D_data_create_mask(seg_paths,
-                            #         #                                                              self.model_shape[1:],
-                            #         #                                                              to_process=True,
-                            #         #                                                              dtype=self.dtype)
-                            #         # else:
-                            #         batch_data, batch_label = tl_seg.get_4D_img_label_data(seg_paths,
-                            #                                                                self.model_shape[1:],
-                            #                                                                json_paths=seg_json_paths,
-                            #                                                                dtype=self.dtype)
-                            #         #----put all data to tf placeholders
-                            #         # recon = sess.run(self.recon,feed_dict={self.tf_input: batch_data})
-                            #
-                            #         feed_dict = {self.tf_input: batch_data, self.tf_input_recon: batch_data,
-                            #                      self.tf_label_batch: batch_label,self.tf_keep_prob: 0}
-                            #
-                            #         loss_temp = sess.run(self.loss_Seg, feed_dict=feed_dict)
-                            #         predict_label = sess.run(self.prediction_Seg, feed_dict=feed_dict)
-                            #         # predict_label = np.argmax(predict_label, axis=-1).astype(np.uint8)
-                            #
-                            #         # ----calculate the loss and accuracy
-                            #         test_loss_seg += loss_temp
-                            #
-                            #         seg_p.cal_intersection_union(predict_label, batch_label)
-                            #         _ = seg_p.cal_label_defect_by_acc_v2(predict_label,batch_label)
-                            #         _ = seg_p.cal_predict_defect_by_acc_v2(predict_label,batch_label)
-                            #
-                            #     test_loss_seg /= test_ites_seg
-                            #     # seg_test_result_dict['loss'] = test_loss_seg
-                            #
-                            #     # ----save results in the log file
-                            #     seg_test_loss_list.append(float(test_loss_seg))
-                            #     self.log["seg_test_loss_list"] = seg_test_loss_list
-                            #     test_iou_seg, test_acc_seg, test_all_acc_seg = seg_p.cal_iou_acc(save_dict=self.log,
-                            #                                                                         name='test')
-                            #     test_defect_recall = seg_p.cal_defect_recall(save_dict=self.log, name='test')
-                            #     test_defect_sensitivity = seg_p.cal_defect_sensitivity(save_dict=self.log, name='test')
-                            #
-                            #     #----find the best performance(SEG)
-                            #     new_value = self.get_value_from_performance(seg_p,seg_var.get('target_of_best'))
-                            #     self.performance_process(epoch, new_value, LV, sess, encript_flag)
+                                        # ----image with label
+                                        img_answer = dataloader_SEG_predict.combine_img_label(
+                                            img_ori,
+                                            batch_label[i],
+                                        )
 
-                    #----save ckpt, pb files
-                    if (epoch + 1) % save_period == 0 or (epoch + 1) == epochs:
-                            model_save_path = self.saver.save(sess, self.out_dir_prefix, global_step=epoch)
+                                        show_imgs.append(img_answer)
 
-                            # ----encode ckpt file
-                            if encript_flag is True:
-                                encode_CKPT(model_save_path, encode_num=encode_num, encode_header=encode_header)
+                                        qty_show = len(show_imgs)
+                                        plt.figure(num=1, figsize=(5 * qty_show, 5 * qty_show), clear=True)
 
-                            #----save pb(normal)
-                            save_pb_file(sess, self.pb_save_list, self.pb_save_path, encode=encript_flag,
-                                         random_num_range=encode_num, header=encode_header)
+                                        for k, show_img in enumerate(show_imgs):
+                                            plt.subplot(1, qty_show, k + 1)
+                                            plt.imshow(show_img)
+                                            plt.axis('off')
+                                            plt.title(titles[i])
+                                        save_path = os.path.join(self.new_predict_dir, batch_paths[i].split("\\")[-1])
+                                        plt.savefig(save_path)
 
-                    #----record the end time
-                    self.record_time()
+                #----save ckpt, pb files
+                if (epoch + 1) % save_period == 0 or (epoch + 1) == epochs:
+                    self.save_ckpt_and_pb(epoch)
 
-                    with open(self.log_path, 'w') as f:
-                        json.dump(self.log, f)
+                #----record the end time
+                self.record_time()
 
-                    if encript_flag is True:
-                        if os.path.exists(self.log_path):
-                            file_transfer(self.log_path, cut_num_range=30, random_num_range=10)
-                    msg = "儲存訓練結果數據至{}".format(self.log_path)
-                    say_sth(msg, print_out=print_out)
+                #----save the log
+                self.save_log()
 
-            #----error messages
-            if True in list(error_dict.values()):
-                for key, value in error_dict.items():
-                    if value is True:
-                        say_sth('', print_out=print_out, header=key)
-            else:
-                say_sth('AI Engine結束!!期待下次再相見', print_out=print_out, header='AIE_end')
+        #----error messages
+        if True in list(error_dict.values()):
+            for key, value in error_dict.items():
+                if value is True:
+                    say_sth('', print_out=print_out, header=key)
+        else:
+            self.sess.close()
+            say_sth('AI Engine結束!!期待下次再相見', print_out=print_out, header='AIE_end')
 
     #----functions
-    def seg_eval_by_dataloader(self, sess, dataloader, seg_p):
-        seg_p.reset_arg()
-        seg_p.reset_defect_stat()
+    def save_log(self):
+        with open(self.log_path, 'w') as f:
+            json.dump(self.log, f)
+
+        if self.encript_flag is True:
+            if os.path.exists(self.log_path):
+                file_transfer(self.log_path, cut_num_range=30, random_num_range=10)
+
+        msg = "儲存訓練結果數據至{}".format(self.log_path)
+        say_sth(msg, print_out=True)
+
+    def save_ckpt_and_pb(self,epoch):
+        model_save_path = self.saver.save(self.sess, self.out_dir_prefix, global_step=epoch)
+
+        # ----encode ckpt file
+        if self.encript_flag is True:
+            encode_CKPT(model_save_path, encode_num=self.encode_num, encode_header=self.encode_header)
+
+        # ----save pb(normal)
+        save_pb_file(self.sess, self.pb_save_list, self.pb_save_path, encode=self.encript_flag,
+                     random_num_range=self.encode_num, header=self.encode_header)
+
+    def seg_eval_by_dataloader(self, dataloader,name='train'):
+        self.seg_p.reset_arg()
+        self.seg_p.reset_defect_stat()
         seg_loss = 0
         dataloader.reset()
         for batch_paths, batch_data, batch_label in dataloader:
@@ -1605,30 +1366,48 @@ class AE_Seg():
                          self.tf_label_batch: batch_label,
                          self.tf_keep_prob: 1.0,
                          self.tf_dropout: 0.0}
-            loss_temp = sess.run(self.loss_Seg, feed_dict=feed_dict)
-            predict_label = sess.run(self.prediction_Seg, feed_dict=feed_dict)
+            loss_temp = self.sess.run(self.loss_Seg, feed_dict=feed_dict)
+            predict_label = self.sess.run(self.prediction_Seg, feed_dict=feed_dict)
 
             # ----calculate the loss and accuracy
             seg_loss += loss_temp
-            seg_p.cal_intersection_union(predict_label, batch_label)
-            _ = seg_p.cal_label_defect_by_acc_v2(predict_label, batch_label)
-            _ = seg_p.cal_predict_defect_by_acc_v2(predict_label, batch_label)
+            self.seg_p.cal_intersection_union(predict_label, batch_label)
+            _ = self.seg_p.cal_label_defect_by_acc_v2(predict_label, batch_label)
+            _ = self.seg_p.cal_predict_defect_by_acc_v2(predict_label, batch_label)
 
         seg_loss /= dataloader.iterations
+        iou_seg, acc_seg, all_acc_seg = self.seg_p.cal_iou_acc(save_dict=self.log,name=name)
+        defect_recall = self.seg_p.cal_defect_recall(save_dict=self.log, name=name)
+        defect_sensitivity = self.seg_p.cal_defect_sensitivity(save_dict=self.log, name=name)
 
-        return seg_loss
+        #----
+        if name == 'train':
+            self.seg_train_loss_list.append(float(seg_loss))
+            self.log["seg_train_loss_list"] = self.seg_train_loss_list
+        else:
+            self.seg_test_loss_list.append(float(seg_loss))
+            self.log["seg_test_loss_list"] = self.seg_test_loss_list
 
-    def ae_eval_by_dataloader(self,sess, dataloader):
-        train_loss = 0
+        return seg_loss,iou_seg,acc_seg,defect_recall,defect_sensitivity
+
+    def ae_eval_by_dataloader(self, dataloader,name='train'):
+        loss = 0
         dataloader.reset()
         for batch_paths, batch_data in dataloader:
             feed_dict = {self.tf_input: batch_data, self.tf_keep_prob: 1.0}
-            loss_temp = sess.run(self.loss_AE, feed_dict=feed_dict)
-            train_loss += loss_temp
+            loss_temp = self.sess.run(self.loss_AE, feed_dict=feed_dict)
+            loss += loss_temp
 
-        train_loss /= dataloader.iterations
+        loss /= dataloader.iterations
 
-        return train_loss
+        if name == "train":
+            self.train_loss_list.append(float(loss))
+            self.log["train_loss_list"] = loss
+        else:
+            self.test_loss_list.append(float(loss))
+            self.log["test_loss_list"] = loss
+
+        return loss
 
     def record_time(self,):
         now_time = time.time()
@@ -1755,7 +1534,7 @@ class AE_Seg():
 
         return break_flag
 
-    def read_manual_cmd(self,to_read_manual_cmd,print_out=False):
+    def read_manual_cmd(self,to_read_manual_cmd):
         break_flag = False
         if to_read_manual_cmd:
             j_path = os.path.join(self.save_dir, 'manual_cmd.json')
@@ -1765,11 +1544,11 @@ class AE_Seg():
                 if cmd_dict.get('to_stop_training') is True:
                     break_flag = True
                     msg = "接收到manual cmd: stop the training!"
-                    say_sth(msg, print_out=print_out)
+                    say_sth(msg, print_out=True)
 
         return break_flag
 
-    def performance_process_AE(self,epoch,loss_value,LV,sess,encript_flag):
+    def performance_process_AE(self,epoch,loss_value,LV):
         if self.loss_method == 'ssim':
             new_value = np.round(loss_value * 100, 2)
         else:
@@ -1793,14 +1572,14 @@ class AE_Seg():
 
                 # ----save the better one
                 pb_save_path = create_pb_path("infer_{}".format(new_value), self.save_dir,
-                                              to_encode=encript_flag)
-                save_pb_file(sess, self.pb_save_list, pb_save_path, encode=encript_flag,
+                                              to_encode=self.encript_flag)
+                save_pb_file(self.sess, self.pb_save_list, pb_save_path, encode=self.encript_flag,
                              random_num_range=self.encode_num, header=self.encode_header)
                 # ----update record value
                 LV['record_value'] = new_value
                 LV['pb_save_path_old'] = pb_save_path
 
-    def performance_process(self,epoch,new_value,LV,sess,encript_flag):
+    def performance_process_SEG(self, epoch, new_value, LV):
         if epoch == 0:
             LV['record_value_seg'] = new_value
         else:
@@ -1811,22 +1590,22 @@ class AE_Seg():
 
                 # ----save the better one
                 pb_save_path = create_pb_path(f"infer_best_epoch{epoch}", self.save_dir,
-                                              to_encode=encript_flag)
-                save_pb_file(sess, self.pb_save_list, pb_save_path, encode=encript_flag,
+                                              to_encode=self.encript_flag)
+                save_pb_file(self.sess, self.pb_save_list, pb_save_path, encode=self.encript_flag,
                              random_num_range=self.encode_num, header=self.encode_header)
                 # ----update record value
                 LV['record_value_seg'] = new_value
                 LV['pb_seg_save_path_old'] = pb_save_path
 
-    def get_value_from_performance(self,seg_p,target_of_best="defect_recall"):
+    def get_value_from_performance(self,target_of_best="defect_recall"):
         if target_of_best == 'defect_recall':
-            new_value = seg_p.sum_defect_recall()
+            new_value = self.seg_p.sum_defect_recall()
         elif target_of_best == 'defect_sensitivity':
-            new_value = seg_p.sum_defect_sensitivity()
+            new_value = self.seg_p.sum_defect_sensitivity()
         elif target_of_best == 'recall+sensitivity':
-            new_value = seg_p.sum_defect_recall() + seg_p.sum_defect_sensitivity()
+            new_value = self.seg_p.sum_defect_recall() + self.seg_p.sum_defect_sensitivity()
         else:
-            new_value = seg_p.sum_iou_acc()
+            new_value = self.seg_p.sum_iou_acc()
 
         return new_value
 

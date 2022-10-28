@@ -6424,8 +6424,8 @@ if __name__ == "__main__":
     # file_transfer(path)
 
     #----file decode
-    path = r"D:\code\model_saver\AE_Seg_149\train_result_5.nst"
-    file_decode_v2(path,random_num_range=10)
+    # path = r"D:\code\model_saver\AE_Seg_149\train_result_5.nst"
+    # file_decode_v2(path,random_num_range=10)
     # file_decode_v2(path)
 
     #----tool
@@ -6484,7 +6484,7 @@ if __name__ == "__main__":
     # img_mask(img_source, json_path,zoom_in_value=[75,77,88,88], img_type='path')
 
     #----check results
-    dir_path = r"D:\code\model_saver\AE_Seg_151"
+    dir_path = r"D:\code\model_saver\AE_Seg_149_複製"
     # dir_path = r"C:\Users\User\Desktop\train_result"
     # dir_path = r"D:\code\model_saver\AE_Seg_139"
     # only2see = ['seg_test_defect_sensitivity_list']
