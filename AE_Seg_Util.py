@@ -16,7 +16,7 @@ else:
     # import tensorflow_addons as tfa
     # from tensorflow.keras.layers import Activation
     # from tensorflow.keras.utils import get_custom_objects
-print("Tensorflow version of {}: {}".format(__file__,tf.__version__))
+# print("Tensorflow version of {}: {}".format(__file__,tf.__version__))
 print_out = True
 TCPConnected = False
 
@@ -6255,6 +6255,25 @@ def get_classname_id_color_v2(source,print_out=False):
 
     return dict(
         class_names=name_list,
+        class_name2id=class_name2id,
+        id2class_name=id2class_name,
+        id2color=id2color
+    )
+
+def get_classname_id_color_from_train_results(dir_path):
+    content = get_latest_json_content(dir_path)
+    if content is None:
+        msg = "couldn't find train_result json files"
+        say_sth(msg, print_out=True)
+        raise ValueError
+    # content取出來的id都是str，但是實際上使用是int，所以要再經過轉換
+    class_names = content['class_names']
+    class_name2id = dict_transform(content['class_name2id'], set_value=True)
+    id2color = dict_transform(content['id2color'], set_key=True)
+    id2class_name = dict_transform(content['id2class_name'], set_key=True)
+
+    return dict(
+        class_names=class_names,
         class_name2id=class_name2id,
         id2class_name=id2class_name,
         id2color=id2color

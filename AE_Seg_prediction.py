@@ -2,7 +2,9 @@ import os,math,cv2,json,imgviz,time,re
 import numpy as np
 import tensorflow
 import matplotlib.pyplot as plt
-from AE_Seg_Util import tools,Seg_performance,get_classname_id_color,tf_utility,create_stack_img,get_paths,DataLoader4Seg
+import AE_Seg_Util
+from AE_Seg_Util import tools,Seg_performance,get_classname_id_color,tf_utility,create_stack_img,get_paths,DataLoader4Seg,\
+    get_classname_id_color_v2
 
 #----tensorflow version check
 if tensorflow.__version__.startswith('1.'):
@@ -1063,7 +1065,7 @@ def recon_seg_prediction_v2(img_dir,pb_path,node_dict,img_save_dict,threshold_di
                      id2class_name_path=id2class_name_path,
                      time=time.asctime())
 
-def recon_seg_prediction_v3(img_dir,pb_path,node_dict,img_save_dict,threshold_dict,compare_with_answers=False,
+def recon_seg_prediction_v3(img_dir_list,pb_path,node_dict,img_save_dict,threshold_dict,compare_with_answers=False,
                          plt_arange='',pipelines=None,
                          id2class_name_path=None):
     # ----var
@@ -1091,28 +1093,74 @@ def recon_seg_prediction_v3(img_dir,pb_path,node_dict,img_save_dict,threshold_di
         threshold_dict['acc_threshold'] = acc_threshold
 
 
-    paths,qty = get_paths(img_dir)
 
-    msg = "SEG圖片數量:{}".format(qty)
-    say_sth(msg, print_out=True)
 
-    if qty == 0:
-        msg = "No images are found!"
-        say_sth(msg, print_out=True)
+    #----get classname2id, id2color(from train_results)
+    if id2class_name_path is None:
+        classname_id_color_dict = AE_Seg_Util.get_classname_id_color_from_train_results(os.path.dirname(pb_path))
     else:
-        #----create save dir
+        # ----read class names
+        classname_id_color_dict = AE_Seg_Util.get_classname_id_color_v2(id2class_name_path, print_out=print_out)
+        # class_names, class_name2id, id2class_name, id2color, img_index = get_classname_id_color(id2class_name_path, print_out=True,
+        #                                                                              save_dir=None)
+
+    img_index = AE_Seg_Util.draw_color_index(classname_id_color_dict['class_names'])
+    id2color = classname_id_color_dict['id2color']
+    class_name2id = classname_id_color_dict['class_name2id']
+    id2class_name = classname_id_color_dict['id2class_name']
+    class_names = classname_id_color_dict['class_names']
+
+
+    tf_tl.class_name2id = class_name2id
+    tf_tl.id2color = id2color
+
+    #----Seg performance
+    if compare_with_answers:
+        seg_p = Seg_performance(print_out=True)
+        seg_p.set_classname_id_color(**classname_id_color_dict)
+
+        # if to_save_defect_undetected:
+        #     seg_p.save_dir = save_dir4defect_undetected
+        #     seg_p.to_save_img_undetected = True
+        # if to_save_false_detected:
+        #     seg_p.save_dir4falseDetected = save_dir4false_detected
+        #     seg_p.to_save_img_falseDetected = True
+        seg_p.reset_arg()
+        seg_p.reset_defect_stat(acc_threshold=acc_threshold)
+
+    #----start time
+    d_t = time.time()
+
+    tf_tl.sess, tf_tl.tf_dict = tf_tl.model_restore_from_pb(pb_path, node_dict)
+    tf_input = tf_tl.tf_dict['input']
+    tf_prediction = tf_tl.tf_dict['prediction']
+    tf_input_recon = tf_tl.tf_dict.get('input_recon')
+    tf_recon = tf_tl.tf_dict['recon']
+    tf_softmax = tf_tl.tf_dict['softmax_Seg']
+
+    model_shape = tf_tl.get_model_shape('input')
+
+    # predict_ites_seg = math.ceil(qty / batch_size)
+    if isinstance(img_dir_list,str):
+        img_dir_list = [img_dir_list]
+    for img_dir in img_dir_list:
+        paths, qty = get_paths(img_dir)
+
+        msg = "SEG圖片數量:{}".format(qty)
+        say_sth(msg, print_out=True)
+
+        # ----create save dir
         make_dir_list = []
-        if isinstance(img_dir,list):
-            save_dir = os.path.join(img_dir[0], pb_path.split("\\")[-2])
-        else:
-            save_dir = os.path.join(img_dir, pb_path.split("\\")[-2])
+        save_dir = os.path.join(img_dir, pb_path.split("\\")[-2])
         make_dir_list.append(save_dir)
 
         if to_save_predict_image:
-            save_dir4prediction_ok = os.path.join(save_dir, 'prediction','ok')
-            save_dir4prediction_ng = os.path.join(save_dir, 'prediction','ng')
-            make_dir_list.append(save_dir4prediction_ok)
-            make_dir_list.append(save_dir4prediction_ng)
+            save_dir4prediction = os.path.join(save_dir, 'prediction')
+            make_dir_list.append(save_dir4prediction)
+            # save_dir4prediction_ok = os.path.join(save_dir, 'prediction', 'ok')
+            # save_dir4prediction_ng = os.path.join(save_dir, 'prediction', 'ng')
+            # make_dir_list.append(save_dir4prediction_ok)
+            # make_dir_list.append(save_dir4prediction_ng)
         if to_save_false_detected:
             save_dir4false_detected = os.path.join(save_dir, 'false_detected')
             make_dir_list.append(save_dir4false_detected)
@@ -1122,56 +1170,9 @@ def recon_seg_prediction_v3(img_dir,pb_path,node_dict,img_save_dict,threshold_di
 
         makedirs(make_dir_list)
 
-        #----announce dataloader
+        # ----announce dataloader
         dataloader = DataLoader4Seg(paths, batch_size=2, pipelines=pipelines, to_shuffle=False)
-
-        #----get classname2id, id2color(from train_results)
-        if id2class_name_path is None:
-            content = get_latest_json_content(os.path.dirname(pb_path))
-            if content is None:
-                msg = "couldn't find train_result json files"
-                say_sth(msg, print_out=True)
-                raise ValueError
-            # content取出來的id都是str，但是實際上使用是int，所以要再經過轉換
-            class_names = content['class_names']
-            class_name2id = dict_transform(content['class_name2id'], set_value=True)
-            id2color = dict_transform(content['id2color'], set_key=True)
-            dataloader.class_name2id = class_name2id
-            dataloader.id2color = id2color
-        else:
-            class_names, class_name2id, id2class_name, id2color, img_index = get_classname_id_color(id2class_name_path, print_out=True,
-                                                                                         save_dir=None)
-            dataloader.get_classname_id_color(id2class_name_path,print_out=True)
-
-
-        tf_tl.class_name2id = class_name2id
-        tf_tl.id2color = id2color
-
-        #----Seg performance
-        if compare_with_answers:
-            seg_p = Seg_performance(len(class_names), print_out=True)
-            if to_save_defect_undetected:
-                seg_p.save_dir = save_dir4defect_undetected
-                seg_p.to_save_img_undetected = True
-            if to_save_false_detected:
-                seg_p.save_dir4falseDetected = save_dir4false_detected
-                seg_p.to_save_img_falseDetected = True
-            seg_p.reset_arg()
-            seg_p.reset_defect_stat(acc_threshold=acc_threshold)
-
-        #----start time
-        d_t = time.time()
-
-        tf_tl.sess, tf_tl.tf_dict = tf_tl.model_restore_from_pb(pb_path, node_dict)
-        tf_input = tf_tl.tf_dict['input']
-        tf_prediction = tf_tl.tf_dict['prediction']
-        tf_input_recon = tf_tl.tf_dict.get('input_recon')
-        tf_recon = tf_tl.tf_dict['recon']
-        tf_softmax = tf_tl.tf_dict['softmax_Seg']
-
-        model_shape = tf_tl.get_model_shape('input')
-
-        # predict_ites_seg = math.ceil(qty / batch_size)
+        dataloader.set_classname_id_color(**classname_id_color_dict)
 
 
         # for idx_seg in range(predict_ites_seg):
@@ -1194,9 +1195,7 @@ def recon_seg_prediction_v3(img_dir,pb_path,node_dict,img_save_dict,threshold_di
             batch_recon = tf_tl.sess.run(tf_recon, feed_dict=feed_dict)
             if tf_input_recon is not None:
                 feed_dict[tf_input_recon] = batch_recon
-            predict_label = tf_tl.sess.run(tf_prediction,
-                                           feed_dict=feed_dict)  # ,tf_input_recon:batch_recon
-
+            predict_label = tf_tl.sess.run(tf_prediction,feed_dict=feed_dict)  # ,tf_input_recon:batch_recon
             predict_softmax = tf_tl.sess.run(tf_softmax,feed_dict=feed_dict)
 
             #----prob_threshold process
@@ -1237,7 +1236,6 @@ def recon_seg_prediction_v3(img_dir,pb_path,node_dict,img_save_dict,threshold_di
                         plt.title(show_names[i])
                     plt.show()
 
-
             if compare_with_answers:
                 #----calculate the intersection and onion
                 seg_p.cal_intersection_union(predict_label, batch_label)
@@ -1256,7 +1254,8 @@ def recon_seg_prediction_v3(img_dir,pb_path,node_dict,img_save_dict,threshold_di
                     falseDetected_list.extend(t_list)
 
             batch_data *= 255
-            batch_data = batch_data.astype(np.uint8)
+            batch_data = cv2.convertScaleAbs(batch_data)
+            # batch_data = batch_data.astype(np.uint8)
 
             for i in range(len(predict_label)):
                 img = batch_data[i]
@@ -1265,26 +1264,30 @@ def recon_seg_prediction_v3(img_dir,pb_path,node_dict,img_save_dict,threshold_di
                 # ----label to color
                 # zeros = np.zeros_like(batch_data[i])
                 zeros = img.copy()
-
-                ng_flag = False
+                #
+                # ng_flag = False
                 map_sum = np.sum(predict_label[i])
                 if map_sum > 0:
-                    cc_nums, cc_map, stats, centroids = cv2.connectedComponentsWithStats(predict_label[i], connectivity=8)
-                    for cc_num in range(1, cc_nums):
-                        # s = stats[cc_num]
-                        coors = np.where(cc_map == cc_num)
-                        predict_class = predict_label[i][coors][0]
-                        predict_name = id2class_name[predict_class]
-                        zeros[coors] = dataloader.id2color[predict_class]
-                        text_list = re.findall('ng', predict_name, re.I)
-                        if len(text_list):
-                            if ng_flag is False:
-                                ng_flag = True
-
-                if ng_flag:
-                    ng_count += 1
-                else:
-                    ok_count += 1
+                    for uni_num in np.unique(predict_label[i]):
+                        if uni_num > 0:
+                            coors = np.where(predict_label[i] == uni_num)
+                            zeros[coors] = dataloader.id2color[uni_num]
+                #     cc_nums, cc_map, stats, centroids = cv2.connectedComponentsWithStats(predict_label[i], connectivity=8)
+                #     for cc_num in range(1, cc_nums):
+                #         # s = stats[cc_num]
+                #         coors = np.where(cc_map == cc_num)
+                #         predict_class = predict_label[i][coors][0]
+                #         predict_name = id2class_name[predict_class]
+                #         zeros[coors] = dataloader.id2color[predict_class]
+                #         text_list = re.findall('ng', predict_name, re.I)
+                #         if len(text_list):
+                #             if ng_flag is False:
+                #                 ng_flag = True
+                #
+                # if ng_flag:
+                #     ng_count += 1
+                # else:
+                #     ok_count += 1
 
 
 
@@ -1314,14 +1317,14 @@ def recon_seg_prediction_v3(img_dir,pb_path,node_dict,img_save_dict,threshold_di
                                 show_imgs.append(img_ori[:, :, ::-1])
                                 titles.append('original')
 
-                    if ng_flag:
-                        dir_path = save_dir4prediction_ng
-                    else:
-                        dir_path = save_dir4prediction_ok
+                    # if ng_flag:
+                    #     dir_path = save_dir4prediction_ng
+                    # else:
+                    #     dir_path = save_dir4prediction_ok
 
                     qty_show = len(show_imgs)
                     if qty_show == 1:
-                        save_path = os.path.join(dir_path, path.split("\\")[-1])
+                        save_path = os.path.join(save_dir4prediction, path.split("\\")[-1])
                         ext = "." + path.split("\\")[-1].split('.')[-1]
                         # cv2.imwrite(save_path, show_imgs[0][:, :, ::-1])
                         cv2.imencode(ext, show_imgs[0][:, :, ::-1])[1].tofile(save_path)
@@ -1330,7 +1333,7 @@ def recon_seg_prediction_v3(img_dir,pb_path,node_dict,img_save_dict,threshold_di
                         show_imgs.append(img_index)
                         img_combine = create_stack_img(show_imgs)
 
-                        save_path = os.path.join(dir_path, path.split("\\")[-1].split(".")[0] + '.jpg')
+                        save_path = os.path.join(save_dir4prediction, path.split("\\")[-1].split(".")[0] + '.jpg')
 
                         cv2.imencode('.jpg', img_combine[:, :, ::-1])[1].tofile(save_path)
                         # plt.figure(num=1,figsize=(20 * qty_show, 10 * qty_show), clear=True)
@@ -1515,90 +1518,31 @@ def makedirs(make_dir_list):
         print(msg)
 
 if __name__ == "__main__":
-    # img_dir = r'D:\dataset\optotech\silicon_division\PDAP\藥水殘(原圖+color圖+json檔)\L2_potion\train'
-    # img_dir = r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\selected'
-    img_dir = [
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\selected"
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\NG(多區NG-輕嚴重)_20220504\All_and_no_selected"
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\TLearning_20220715"
-        r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
-        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
-        r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2",
-        # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test',
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\defect_parts\小紅點_淺瑕疵\only_fig",
+    ver_pb_dict = {
+        "0.0.6":r"D:\code\model_saver\AE_Seg_149\infer_best_epoch14.nst",
+        "0.0.5":r"D:\code\model_saver\AE_Seg_149\infer_best_epoch12.nst",
+        "0.0.4":r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch61.nst",
+    }
 
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\test_one_defect_class"
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220829_AOI_NG\real_ans_ori\OK",
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220829_AOI_NG\real_ans\low_contrast"
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_矽電Label_Tidy_data\VRS_Json\test",
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_AOI_NG\real_ans\gold_residual"
-        # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_AOI_NG\real_ans\hole',
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\defects_but_ok_20220922\只有圖"
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_矽電Label_Tidy_data\VRS_Json\NG\Json"
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_AOI_NG\real_ans\NG\hole"
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_AOI_NG\real_ans\NG\particle"
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_AOI_NG\real_ans\NG\tool_ok"
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_AOI_NG\real_ans\should_be_NG"
-        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220829_AOI_NG\real_ans\OK"
-        # r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\All_defects\髒污(屬OK)"
-        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\only_L2\L2_OK_無分類"
-        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\L2_NG_all"
-        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\L2_OK_晶紋"
-        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\Seg\test"
-        # r"D:\dataset\optotech\009IRC-FB\20220616-0.0.4.1-2\AE_Seg\測試"
-        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_NG_AL_lost",
-        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_NG_crack",
-        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_NG_emit_scratch",
-        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_NG_pad_pothole",
-        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_NG_pad_residual_glue",
-        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_NG_pad_scratch",
-        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_NG_pollution",
-        # r"D:\dataset\optotech\009IRC-FB\20220720_4SEG_Train\img_dir\val\L2_OK_line_pattern",
-
-        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\FRR、FAR圖檔\val_0.9\FAR\L2_NG"
-        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\FRR、FAR圖檔\val_0.9\Unknown\L2_NG",
-        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\FRR、FAR圖檔\val_0.9\Unknown\L2_OK"
-        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\vali_try_20220711\L2_OK"
-        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\vali_try_20220711\L2_OK_晶紋"
-
-        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\validation\L2_OK"
-        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\validation\L2_NG"
-        # r"D:\dataset\optotech\009IRC-FB\20220708_0.0.4.1_8class\0.4.1-dataset\8Class\dataset\validation\L2_OK_晶紋"
-
-
-    ]
-    # img_dir = [
-    #     r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\PD-55092G-AP_0.0.1_dataset\Seg_data\gold_particle\test",
-    #     r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\PD-55092G-AP_0.0.1_dataset\Seg_data\hole\test",
-    #     r"D:\dataset\optotech\silicon_division\PDAP\PD-55092\PD-55092G-AP_0.0.1_dataset\Seg_data\Particle\test"
-    # ]
+    # img_dir_list = [
+    #     r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\20221004_AOI_extract_NG\26BR023E01",
+    #     r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\20221004_AOI_extract_NG\26BR023E02",
     #
+    #     # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
+    #     # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
+    #     # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2",
+    #     # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20221102_0.0.4版效果不好的圖"
+    # ]
+    root_dir = r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\20221004_AOI_extract_NG"
+    img_dir_list = [obj.path for obj in os.scandir(root_dir) if obj.is_dir()]
 
-    # pb_path = r"D:\code\model_saver\AE_Seg_137\no_ok\infer_best_epoch46.pb"
-    # pb_path = r"D:\code\model_saver\AE_Seg_137\infer_20220715170549.pb"
-    # pb_path = r"D:\code\model_saver\AE_Seg_139\no_ok\infer_best_epoch49.pb"
-    # pb_path = r"D:\code\model_saver\AE_Seg_139\infer_20220718130302.pb"
-    # pb_path = r"D:\code\model_saver\AE_Seg_140\no_ok\infer_best_epoch48.pb"
-    # pb_path = r"D:\code\model_saver\AE_Seg_140\infer_20220719094845.pb"
-    # pb_path = r"C:\Users\User\Downloads\NST_AI_PD55077AP_FrontSide_LightSet1\Models\infer_best_epoch7.nst"
-    # pb_path = r"D:\dataset\optotech\silicon_division\ST_2118\Models\20220907_0.0.5_0.0.6\NST_AI_ST-2118_FrontSide_LightSet1\Models\infer_best_epoch76.nst"
-    # pb_path = r"D:\code\model_saver\AE_Seg_142\infer_best_epoch298.pb"
-    # pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch77.pb"
-    # pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch57.pb"
-    # pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch119.pb"
-    # pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch61.nst"
+    pb_path = ver_pb_dict['0.0.5']
 
-    pb_path = r"D:\code\model_saver\AE_Seg_149\infer_best_epoch14.nst"#infer_20221006174700 infer_20221006181259
-    # pb_path = r"D:\code\model_saver\AE_Seg_150\infer_best_epoch25.nst"
-    # pb_path = r"D:\code\model_saver\AE_Seg_151\infer_best_epoch99.nst"
-    # pb_path = r"D:\code\model_saver\AE_Seg_152\infer_best_epoch99.nst"
-    # pb_path = r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch82.nst"
-    # pb_path = r"D:\code\model_saver\AE_Seg_145\infer_best_epoch101.pb"
-    # pb_path = r"D:\code\model_saver\AE_Seg_147\infer_best_epoch5.nst"
+
 
     # id2class_name_path = r"D:\dataset\optotech\009IRC-FB\classnames.txt"
-    id2class_name_path = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames.txt"
-    # id2class_name_path = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\classnames_one_defect_class.txt"
+    id2class_name_path = r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\classnames.txt"
+
     node_dict = {'input': 'input:0',
                  'recon':'output_AE:0',
                  'input_recon':'input_recon:0',
@@ -1617,11 +1561,11 @@ if __name__ == "__main__":
     #                      prob_threshold=prob_threshold,
     #                      cc_th=cc_th
     #                      )
-    infer_speed_test(img_dir, pb_path, node_dict,batch_size=1,set_img_num=1000)
+    # infer_speed_test(img_dir, pb_path, node_dict,batch_size=1,set_img_num=1000)
 
-    compare_with_answers = True
+    compare_with_answers = False
     img_save_dict = {
-        'to_save_predict_image': False,
+        'to_save_predict_image': True,
         'img_compare_with_ori': True,
         'to_save_false_detected': False,
         'to_save_defect_undetected': False,
@@ -1630,7 +1574,7 @@ if __name__ == "__main__":
     }
 
     threshold_dict = {
-        'prob_threshold': None,
+        'prob_threshold': 0.8,
         'cc_th': None,
         'acc_threshold': 0.3,
     }
@@ -1643,10 +1587,10 @@ if __name__ == "__main__":
         dict(type='Norm')
     ]
 
-    # recon_seg_prediction_v3(img_dir, pb_path, node_dict, img_save_dict, threshold_dict,
-    #                         pipelines=pipelines,
-    #                         compare_with_answers=compare_with_answers,
-    #                         id2class_name_path=id2class_name_path)
+    recon_seg_prediction_v3(img_dir_list, pb_path, node_dict, img_save_dict, threshold_dict,
+                            pipelines=pipelines,
+                            compare_with_answers=compare_with_answers,
+                            id2class_name_path=id2class_name_path)
 
     #----for loop
     # prob_thresholds = [None,0.6,0.9]

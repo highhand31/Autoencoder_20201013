@@ -1,4 +1,4 @@
-import cv2,sys,shutil,os,json,time,math,imgviz
+import cv2,sys,shutil,os,json,time,math,imgviz,copy
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow
@@ -220,6 +220,36 @@ def say_sth(msg_source, print_out=False,header=None,delay=0.005):
         #     Sock.send(h + msg + end)
         #     time.sleep(delay)
 
+def transmit_data2ui(epoch,print_out,**kwargs):
+    #----var
+    msg_list = list()
+    header_list = list()
+
+    for header,values in kwargs.items():
+        msg = ""
+        if isinstance(values,(list,np.ndarray)):
+            leng = len(values)
+            for i,value in enumerate(values):
+                str_value = str(value)
+                splits = str_value.split(".")
+
+                if len(splits[-1]) > 8:
+                    msg += "{}.{}".format(splits[0],splits[-1][:8])
+                else:
+                    msg += str_value
+
+                if (i+1) < leng:
+                    msg += ','
+        elif isinstance(values,float):
+            msg = "{:.8f}".format(values)
+        else:
+            msg = str(values)
+
+        msg_list.append('{},{}'.format(epoch, msg))
+        header_list.append(header)
+
+    say_sth(msg_list, print_out=print_out, header=header_list)
+
 def GPU_setting(GPU_ratio):
     config = tf.ConfigProto(log_device_placement=False,
                             allow_soft_placement=True)
@@ -245,8 +275,8 @@ def weights_check(sess,saver,save_dir,encript_flag=True,encode_num=87,encode_hea
         say_sth(msg, print_out=print_out)
         try:
             sess.run(tf.global_variables_initializer())
-        except:
-            say_sth(error_msg,print_out=print_out)
+        except Exception as err:
+            say_sth(f"Error:{err}", print_out=True)
             status = False
     else:
         # ----get file created time and use the largest one
@@ -263,8 +293,8 @@ def weights_check(sess,saver,save_dir,encript_flag=True,encode_num=87,encode_hea
             say_sth(msg, print_out=print_out)
             try:
                 sess.run(tf.global_variables_initializer())
-            except:
-                say_sth(error_msg,print_out=print_out)
+            except Exception as err:
+                say_sth(f"Error:{err}", print_out=True)
                 status = False
         else:
             # ----file decode
@@ -287,9 +317,10 @@ def weights_check(sess,saver,save_dir,encript_flag=True,encode_num=87,encode_hea
                 if encript_flag is True:
                     file_transfer(data_file, random_num_range=encode_num, header=encode_header)
                     file_transfer(files[arg_max], random_num_range=encode_num, header=encode_header)
-            except:
-                msg = "恢復模型時產生錯誤"
-                say_sth(msg, print_out=print_out)
+            except Exception as err:
+                say_sth(f"Error:{err}", print_out=True)
+                # msg = "恢復模型時產生錯誤"
+                # say_sth(msg, print_out=print_out)
                 status = False
                 try:
                     sess.run(tf.global_variables_initializer())
@@ -362,11 +393,11 @@ def get_time4tailer():
 
     return name_tailer
 
-def update_dict(new_dict,default_dict):
-    update_dict = default_dict.copy()
+def update_dict(new_dict,old_dict):
+    re_dict = copy.deepcopy(old_dict)
     for key, value in new_dict.items():
-        update_dict[key] = value
-    return update_dict
+        re_dict[key] = value
+    return re_dict
 
 def get_paths(img_source,ext=None):
     # ----var
@@ -403,7 +434,11 @@ def break_signal_check():
 
 #----main class
 class AE_Seg():
-    def __init__(self,para_dict):
+    def __init__(self,para_dict,user_dict=None):
+
+        #----config process
+        if isinstance(user_dict,dict):
+            para_dict = self.update_config_dict(user_dict,para_dict)
 
         #----use previous settings
         if para_dict.get('use_previous_settings'):
@@ -496,6 +531,7 @@ class AE_Seg():
         log = classname_id_color_dict.copy()
 
         #----local var to global
+        self.para_dict = para_dict
         self.to_train_ae = to_train_ae
         self.to_train_seg = to_train_seg
         self.status = bool(to_train_seg+to_train_ae)
@@ -512,9 +548,9 @@ class AE_Seg():
             self.predict_img_dir = predict_img_dir
             self.classname_id_color_dict = classname_id_color_dict
 
-    def model_init(self,para_dict):
+    def model_init(self):
         #----var parsing
-
+        para_dict = self.para_dict
         # ----use previous settings
         if para_dict.get('use_previous_settings'):
             if isinstance(self.para_dict,dict):
@@ -862,7 +898,7 @@ class AE_Seg():
             elif infer_method4Seg == 'Seg_pooling_net_V10':
                 logits_Seg = models_AE_Seg.Seg_pooling_net_V10(tf_input_process, tf_input_recon, seg_var['encode_dict'],
                                                 seg_var['decode_dict'],
-                                                to_reduce=seg_var.get('to_reduce'), out_channel=class_num,
+                                                to_reduce=seg_var.get('to_reduce'), out_channel=self.class_num,
                                                 print_out=print_out)
                 softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
                 prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
@@ -960,7 +996,8 @@ class AE_Seg():
             self.tf_dropout = tf_dropout
             self.infer_method4Seg = infer_method4Seg
 
-    def train(self,para_dict):
+    def train(self):
+        para_dict = self.para_dict
         # ----use previous settings
         if para_dict.get('use_previous_settings'):
             if isinstance(self.para_dict, dict):
@@ -994,13 +1031,14 @@ class AE_Seg():
             record_value=0,
             record_value_seg=0
             )
+        self.break_flag = False
         self.train_loss_list = list()
         self.seg_train_loss_list = list()
         self.test_loss_list = list()
         self.seg_test_loss_list = list()
 
 
-        error_dict = {'GPU_resource_error': False}
+        self.error_dict = {'GPU_resource_error': False}
         keep_prob = 0.7
 
         #----AE hyper-parameters
@@ -1063,21 +1101,14 @@ class AE_Seg():
         status = weights_check(self.sess, self.saver, self.save_dir, encript_flag=encript_flag,
                                encode_num=encode_num, encode_header=encode_header)
         if status is False:
-            error_dict['GPU_resource_error'] = True
+            self.error_dict['GPU_resource_error'] = True
         elif status is True:
 
             # ----epoch training
             for epoch in range(epochs):
-                # ----read manual cmd
-                break_flag = self.read_manual_cmd(para_dict.get('to_read_manual_cmd'))
-                # ----break the training
-                if break_flag:
-                    break_flag = False
-                    break
+                #----read manual cmd
+                # break_flag = self.read_manual_cmd(para_dict.get('to_read_manual_cmd'))
 
-                #----error check
-                if True in list(error_dict.values()):
-                    break
                 #----record the epoch start time
                 self.set_epoch_start_time()
 
@@ -1085,23 +1116,29 @@ class AE_Seg():
                 if self.to_train_ae is True:
                     if to_fix_ae is False:
                         #----optimizations(AE train set)
-                        dataloader_AE_train.reset()
-                        for batch_paths, batch_data in dataloader_AE_train:
-                            #----check break signal from TCPIP
-                            break_flag = break_signal_check()
-                            if break_flag:
-                                self.save_ckpt_and_pb(epoch)
-                                break
+                        self.ae_opti_by_dataloader(dataloader_AE_train)
+                        if self.break_flag:
+                            break
+                        # dataloader_AE_train.reset()
+                        # for batch_paths, batch_data in dataloader_AE_train:
+                        #     feed_dict = {self.tf_input: batch_data, self.tf_keep_prob: keep_prob}
+                        #     # ----optimization
+                        #     try:
+                        #         self.sess.run(self.opt_AE, feed_dict=feed_dict)
+                        #     except:
+                        #         error_dict['GPU_resource_error'] = True
+                        #         msg = "Error:權重最佳化時產生錯誤，可能GPU資源不夠導致"
+                        #         say_sth(msg, print_out=print_out)
+                        #         break_flag = True
+                        #         break
+                        #
+                        #     #----check break signal from TCPIP
+                        #     break_flag = break_signal_check()
+                        #     if break_flag:
+                        #         # self.save_ckpt_and_pb(epoch)
+                        #         break
 
-                            feed_dict = {self.tf_input: batch_data, self.tf_keep_prob: keep_prob}
-                            # ----optimization
-                            try:
-                                self.sess.run(self.opt_AE, feed_dict=feed_dict)
-                            except:
-                                error_dict['GPU_resource_error'] = True
-                                msg = "Error:權重最佳化時產生錯誤，可能GPU資源不夠導致"
-                                say_sth(msg, print_out=print_out)
-                                break
+                        # say_sth("AE opti complete",print_out=True)
 
                         #----evaluation(AE train set)
                         train_loss = self.ae_eval_by_dataloader(dataloader_AE_train,name='train')
@@ -1118,13 +1155,13 @@ class AE_Seg():
                                              )
 
                         #----send protocol data(for UI to draw)
-                        self.transmit_data2ui(epoch, print_out,
+                        transmit_data2ui(epoch, print_out,
                                               train_AE_loss=train_loss,
                                               val_AE_loss=test_loss,
                                               )
 
                         #----find the best performance
-                        self.performance_process_AE(epoch, test_loss, LV, self.sess, encript_flag)
+                        self.performance_process_AE(epoch, test_loss, LV)
 
                         #----Check if stops the training
                         goal = self.target_comparison_AE(test_loss,loss_method=self.loss_method)
@@ -1142,7 +1179,8 @@ class AE_Seg():
                                     #                                   self.model_shape[1:], dtype=self.dtype)
                                     #     feed_dict[self.tf_input_standard] = img_standard
                                     # ----session run
-                                    feed_dict[self.tf_input] = test_img
+                                    feed_dict = {self.tf_input: test_img, self.tf_keep_prob: 1.0}
+                                    #feed_dict[self.tf_input] = test_img
                                     img_sess_out = self.sess.run(self.recon, feed_dict=feed_dict)
                                     # ----process of sess-out
                                     img_sess_out = img_sess_out[0] * 255
@@ -1188,36 +1226,41 @@ class AE_Seg():
                                     # new_filename = os.path.join(self.new_recon_dir, new_filename)
                                     # cv2.imwrite(new_filename, img_ssim)
 
+                if self.break_flag:
+                    self.save_ckpt_and_pb(epoch)
+                    break
+
                 #----SEG part
                 if self.to_train_seg is True:
                     if to_fix_seg is False:
+                        # say_sth("SEG opti ing", print_out=True)
                         # ----optimizations(SEG train set)
-                        dataloader_SEG_train.reset()
-                        for batch_paths, batch_data, batch_label in dataloader_SEG_train:
-                            # ----check break signal from TCPIP
-                            break_flag = break_signal_check()
-                            if break_flag:
-                                self.save_ckpt_and_pb(epoch)
-                                break
-
-                            feed_dict = {self.tf_input: batch_data, self.tf_input_recon: batch_data,
-                                         self.tf_label_batch: batch_label,
-                                         self.tf_keep_prob: keep_prob,
-                                         self.tf_dropout: 0.3}
-                            try:
-                                self.sess.run(self.opt_Seg, feed_dict=feed_dict)
-                            except:
-                                error_dict['GPU_resource_error'] = True
-                                msg = "Error:SEG權重最佳化時產生錯誤，可能GPU資源不夠導致"
-                                say_sth(msg, print_out=print_out)
-                                break
-
-                        #----break the training(cancel all epochs)
-                        if break_flag:
-                            break_flag = False
+                        self.seg_opti_by_dataloader(dataloader_SEG_train)
+                        if self.break_flag:
                             break
-                        if True in list(error_dict.values()):
-                            break
+                        # dataloader_SEG_train.reset()
+                        # for batch_paths, batch_data, batch_label in dataloader_SEG_train:
+                        #
+                        #     feed_dict = {self.tf_input: batch_data, self.tf_input_recon: batch_data,
+                        #                  self.tf_label_batch: batch_label,
+                        #                  self.tf_keep_prob: keep_prob,
+                        #                  self.tf_dropout: 0.3}
+                        #     try:
+                        #         self.sess.run(self.opt_Seg, feed_dict=feed_dict)
+                        #     except:
+                        #         error_dict['GPU_resource_error'] = True
+                        #         msg = "Error:SEG權重最佳化時產生錯誤，可能GPU資源不夠導致"
+                        #         say_sth(msg, print_out=print_out)
+                        #         break_flag = True
+                        #         break
+                        #
+                        #     #----check break signal from TCPIP
+                        #     break_flag = break_signal_check()
+                        #     if break_flag:
+                        #         # self.save_ckpt_and_pb(epoch)
+                        #         break
+
+                        # say_sth("SEG opti complete", print_out=True)
 
                         #----evaluation(SEG train set)
                         train_loss_seg, train_iou_seg, train_acc_seg,train_defect_recall,train_defect_sensitivity = \
@@ -1226,93 +1269,87 @@ class AE_Seg():
                         #----evaluation(SEG val set)
                         test_loss_seg, test_iou_seg, test_acc_seg, test_defect_recall, test_defect_sensitivity = \
                             self.seg_eval_by_dataloader(dataloader_SEG_val, name='test')
-                        # test_loss_seg = self.seg_eval_by_dataloader(self.sess, dataloader_SEG_val, seg_p)
-                        #
-                        # test_iou_seg, test_acc_seg, test_all_acc_seg = seg_p.cal_iou_acc(save_dict=self.log,
-                        #                                                                  name='test')
-                        # test_defect_recall = seg_p.cal_defect_recall(save_dict=self.log, name='test')
-                        # test_defect_sensitivity = seg_p.cal_defect_sensitivity(save_dict=self.log, name='test')
 
-                        #----save results in the log file
-                        # seg_train_loss_list.append(float(train_loss_seg))
-                        # seg_test_loss_list.append(float(test_loss_seg))
-                        # self.log["seg_train_loss_list"] = seg_train_loss_list
-                        # self.log["seg_test_loss_list"] = seg_test_loss_list
+                        if self.break_flag is False:
+                            #----find the best performance(SEG)
+                            new_value = self.get_value_from_performance(seg_var.get('target_of_best'))
+                            self.performance_process_SEG(epoch, new_value, LV)
 
-                        #----find the best performance(SEG)
-                        new_value = self.get_value_from_performance(seg_var.get('target_of_best'))
-                        self.performance_process_SEG(epoch, new_value, LV)
+                            #----display training results
 
-                        # ----display training results
-                        msg = "\n----訓練週期 {} 與相關結果如下----".format(epoch)
-                        say_sth(msg, print_out=print_out)
-                        self.display_results(None,print_out,
-                                             train_SEG_loss=train_loss_seg,
-                                             val_SEG_loss=test_loss_seg,
-                                             )
+                            msg = "\n----訓練週期 {} 與相關結果如下----".format(epoch)
+                            say_sth(msg, print_out=print_out)
+                            self.display_results(None,print_out,
+                                                 train_SEG_loss=train_loss_seg,
+                                                 val_SEG_loss=test_loss_seg,
+                                                 )
 
-                        self.display_results(class_names, print_out,
-                                             train_SEG_iou=train_iou_seg,
-                                             val_SEG_iou=test_iou_seg,
-                                             train_SEG_accuracy=train_acc_seg,
-                                             val_SEG_accuracy=test_acc_seg,
-                                             train_SEG_defect_recall=train_defect_recall,
-                                             val_SEG_defect_recall=test_defect_recall,
-                                             train_SEG_defect_sensitivity=train_defect_sensitivity,
-                                             val_SEG_defect_sensitivity=test_defect_sensitivity
-                                             )
+                            self.display_results(class_names, print_out,
+                                                 train_SEG_iou=train_iou_seg,
+                                                 val_SEG_iou=test_iou_seg,
+                                                 train_SEG_accuracy=train_acc_seg,
+                                                 val_SEG_accuracy=test_acc_seg,
+                                                 train_SEG_defect_recall=train_defect_recall,
+                                                 val_SEG_defect_recall=test_defect_recall,
+                                                 train_SEG_defect_sensitivity=train_defect_sensitivity,
+                                                 val_SEG_defect_sensitivity=test_defect_sensitivity
+                                                 )
 
-                        # ----send protocol data(for UI to draw)
-                        self.transmit_data2ui(epoch, print_out,
-                                              train_loss=train_loss_seg,
-                                              train_SEG_iou=train_iou_seg,
-                                              train_SEG_accuracy=train_acc_seg,
-                                              train_SEG_defect_recall=train_defect_recall,
-                                              train_SEG_defect_sensitivity=train_defect_sensitivity,
-                                              val_loss=test_loss_seg,
-                                              val_SEG_iou=test_iou_seg,
-                                              val_SEG_accuracy=test_acc_seg,
-                                              val_SEG_defect_recall=test_defect_recall,
-                                              val_SEG_defect_sensitivity=test_defect_sensitivity
-                                              )
+                            # ----send protocol data(for UI to draw)
+                            transmit_data2ui(epoch, print_out,
+                                                  train_loss=train_loss_seg,
+                                                  train_SEG_iou=train_iou_seg,
+                                                  train_SEG_accuracy=train_acc_seg,
+                                                  train_SEG_defect_recall=train_defect_recall,
+                                                  train_SEG_defect_sensitivity=train_defect_sensitivity,
+                                                  val_loss=test_loss_seg,
+                                                  val_SEG_iou=test_iou_seg,
+                                                  val_SEG_accuracy=test_acc_seg,
+                                                  val_SEG_defect_recall=test_defect_recall,
+                                                  val_SEG_defect_sensitivity=test_defect_sensitivity
+                                                  )
 
-                        # ----prediction for selected images
-                        if self.seg_predict_qty > 0:
-                            if (epoch + 1) % eval_epochs == 0:
-                                for batch_paths, batch_data, batch_label in dataloader_SEG_predict:
-                                    predict_labels = self.sess.run(self.tf_prediction_Seg,
-                                                              feed_dict={self.tf_input: batch_data,
-                                                                         self.tf_input_recon: batch_data})
-                                    batch_data *= 255
-                                    for i in range(len(predict_labels)):
-                                        img_ori = cv2.convertScaleAbs(batch_data[i])
+                            # ----prediction for selected images
+                            if self.seg_predict_qty > 0:
+                                if (epoch + 1) % eval_epochs == 0:
+                                    for batch_paths, batch_data, batch_label in dataloader_SEG_predict:
+                                        predict_labels = self.sess.run(self.tf_prediction_Seg,
+                                                                  feed_dict={self.tf_input: batch_data,
+                                                                             self.tf_input_recon: batch_data})
+                                        batch_data *= 255
+                                        for i in range(len(predict_labels)):
+                                            img_ori = cv2.convertScaleAbs(batch_data[i])
 
-                                        # ----image with prediction
-                                        img_predict = dataloader_SEG_predict.combine_img_label(
-                                            img_ori,
-                                            predict_labels[i],
-                                        )
+                                            # ----image with prediction
+                                            img_predict = dataloader_SEG_predict.combine_img_label(
+                                                img_ori,
+                                                predict_labels[i],
+                                            )
 
-                                        show_imgs = [img_predict]
+                                            show_imgs = [img_predict]
 
-                                        # ----image with label
-                                        img_answer = dataloader_SEG_predict.combine_img_label(
-                                            img_ori,
-                                            batch_label[i],
-                                        )
+                                            # ----image with label
+                                            img_answer = dataloader_SEG_predict.combine_img_label(
+                                                img_ori,
+                                                batch_label[i],
+                                            )
 
-                                        show_imgs.append(img_answer)
+                                            show_imgs.append(img_answer)
 
-                                        qty_show = len(show_imgs)
-                                        plt.figure(num=1, figsize=(5 * qty_show, 5 * qty_show), clear=True)
+                                            qty_show = len(show_imgs)
+                                            plt.figure(num=1, figsize=(5 * qty_show, 5 * qty_show), clear=True)
 
-                                        for k, show_img in enumerate(show_imgs):
-                                            plt.subplot(1, qty_show, k + 1)
-                                            plt.imshow(show_img)
-                                            plt.axis('off')
-                                            plt.title(titles[i])
-                                        save_path = os.path.join(self.new_predict_dir, batch_paths[i].split("\\")[-1])
-                                        plt.savefig(save_path)
+                                            for k, show_img in enumerate(show_imgs):
+                                                plt.subplot(1, qty_show, k + 1)
+                                                plt.imshow(show_img)
+                                                plt.axis('off')
+                                                plt.title(titles[i])
+                                            save_path = os.path.join(self.new_predict_dir, batch_paths[i].split("\\")[-1])
+                                            plt.savefig(save_path)
+
+                if self.break_flag:
+                    self.save_ckpt_and_pb(epoch)
+                    break
 
                 #----save ckpt, pb files
                 if (epoch + 1) % save_period == 0 or (epoch + 1) == epochs:
@@ -1324,16 +1361,37 @@ class AE_Seg():
                 #----save the log
                 self.save_log()
 
+                #----break the training
+                # if break_flag:
+                #     break_flag = False
+                #     break
+
+                #----error check
+                # if True in list(error_dict.values()):
+                #     break
+
         #----error messages
-        if True in list(error_dict.values()):
-            for key, value in error_dict.items():
+        if True in list(self.error_dict.values()):
+            for key, value in self.error_dict.items():
                 if value is True:
                     say_sth('', print_out=print_out, header=key)
         else:
             self.sess.close()
-            say_sth('AI Engine結束!!期待下次再相見', print_out=print_out, header='AIE_end')
+            # say_sth('AI Engine結束!!期待下次再相見', print_out=print_out, header='AIE_end')
 
     #----functions
+    def update_config_dict(self,new_dict, ori_dict):
+
+        name_list = ['ae_var', 'seg_var']
+        for name in name_list:
+            new_dict[name] = update_dict(new_dict[name], ori_dict[name])
+        combine_dict = update_dict(new_dict, ori_dict)
+        # ----pipeline modification
+        p = Pipeline_modification()
+        p(config_dict=combine_dict)
+
+        return combine_dict
+
     def save_log(self):
         with open(self.log_path, 'w') as f:
             json.dump(self.log, f)
@@ -1356,56 +1414,126 @@ class AE_Seg():
         save_pb_file(self.sess, self.pb_save_list, self.pb_save_path, encode=self.encript_flag,
                      random_num_range=self.encode_num, header=self.encode_header)
 
+    def seg_opti_by_dataloader(self,dataloader,keep_prob=0.5,dropout=0.3):
+        if self.break_flag is False:
+            dataloader.reset()
+            for batch_paths, batch_data, batch_label in dataloader:
+
+                feed_dict = {self.tf_input: batch_data, self.tf_input_recon: batch_data,
+                             self.tf_label_batch: batch_label,
+                             self.tf_keep_prob: keep_prob,
+                             self.tf_dropout: dropout}
+                try:
+                    self.sess.run(self.opt_Seg, feed_dict=feed_dict)
+
+                    #----check break signal from TCPIP
+                    self.break_flag = break_signal_check()
+                    if self.break_flag:
+                        # self.save_ckpt_and_pb(epoch)
+                        break
+                except Exception as err:
+                    self.error_dict['GPU_resource_error'] = True
+                    # msg = "Error:SEG權重最佳化時產生錯誤"
+                    say_sth(f"Error:{err}", print_out=True)
+                    self.break_flag = True
+                    break
+
     def seg_eval_by_dataloader(self, dataloader,name='train'):
-        self.seg_p.reset_arg()
-        self.seg_p.reset_defect_stat()
-        seg_loss = 0
-        dataloader.reset()
-        for batch_paths, batch_data, batch_label in dataloader:
-            feed_dict = {self.tf_input: batch_data, self.tf_input_recon: batch_data,
-                         self.tf_label_batch: batch_label,
-                         self.tf_keep_prob: 1.0,
-                         self.tf_dropout: 0.0}
-            loss_temp = self.sess.run(self.loss_Seg, feed_dict=feed_dict)
-            predict_label = self.sess.run(self.prediction_Seg, feed_dict=feed_dict)
+        seg_loss = None
+        iou_seg = None
+        acc_seg = None
+        defect_recall = None
+        defect_sensitivity = None
+        if self.break_flag is False:
+            self.seg_p.reset_arg()
+            self.seg_p.reset_defect_stat()
+            seg_loss = 0
+            dataloader.reset()
+            for batch_paths, batch_data, batch_label in dataloader:
 
-            # ----calculate the loss and accuracy
-            seg_loss += loss_temp
-            self.seg_p.cal_intersection_union(predict_label, batch_label)
-            _ = self.seg_p.cal_label_defect_by_acc_v2(predict_label, batch_label)
-            _ = self.seg_p.cal_predict_defect_by_acc_v2(predict_label, batch_label)
+                feed_dict = {self.tf_input: batch_data, self.tf_input_recon: batch_data,
+                             self.tf_label_batch: batch_label,
+                             self.tf_keep_prob: 1.0,
+                             self.tf_dropout: 0.0}
+                loss_temp = self.sess.run(self.loss_Seg, feed_dict=feed_dict)
+                predict_label = self.sess.run(self.prediction_Seg, feed_dict=feed_dict)
 
-        seg_loss /= dataloader.iterations
-        iou_seg, acc_seg, all_acc_seg = self.seg_p.cal_iou_acc(save_dict=self.log,name=name)
-        defect_recall = self.seg_p.cal_defect_recall(save_dict=self.log, name=name)
-        defect_sensitivity = self.seg_p.cal_defect_sensitivity(save_dict=self.log, name=name)
+                #----calculate the loss and accuracy
+                seg_loss += loss_temp
+                self.seg_p.cal_intersection_union(predict_label, batch_label)
+                _ = self.seg_p.cal_label_defect_by_acc_v2(predict_label, batch_label)
+                _ = self.seg_p.cal_predict_defect_by_acc_v2(predict_label, batch_label)
 
-        #----
-        if name == 'train':
-            self.seg_train_loss_list.append(float(seg_loss))
-            self.log["seg_train_loss_list"] = self.seg_train_loss_list
-        else:
-            self.seg_test_loss_list.append(float(seg_loss))
-            self.log["seg_test_loss_list"] = self.seg_test_loss_list
+                #----check the break signal
+                self.break_flag = break_signal_check()
+                if self.break_flag:
+                    break
+
+            if self.break_flag:
+                seg_loss /= (dataloader.ite_num + 1)
+            else:
+                seg_loss /= dataloader.iterations
+            iou_seg, acc_seg, all_acc_seg = self.seg_p.cal_iou_acc(save_dict=self.log,name=name)
+            defect_recall = self.seg_p.cal_defect_recall(save_dict=self.log, name=name)
+            defect_sensitivity = self.seg_p.cal_defect_sensitivity(save_dict=self.log, name=name)
+
+            #----
+            if name == 'train':
+                self.seg_train_loss_list.append(float(seg_loss))
+                self.log["seg_train_loss_list"] = self.seg_train_loss_list
+            else:
+                self.seg_test_loss_list.append(float(seg_loss))
+                self.log["seg_test_loss_list"] = self.seg_test_loss_list
 
         return seg_loss,iou_seg,acc_seg,defect_recall,defect_sensitivity
 
+    def ae_opti_by_dataloader(self, dataloader,keep_prob=0.5):
+        dataloader.reset()
+        if self.break_flag is False:
+            for batch_paths, batch_data in dataloader:
+                feed_dict = {self.tf_input: batch_data, self.tf_keep_prob: keep_prob}
+                # ----optimization
+                try:
+                    self.sess.run(self.opt_AE, feed_dict=feed_dict)
+
+                    #----check break signal from TCPIP
+                    self.break_flag = break_signal_check()
+                    if self.break_flag:
+                        # self.save_ckpt_and_pb(epoch)
+                        break
+                except Exception as err:
+                    self.error_dict['GPU_resource_error'] = True
+                    # msg = "Error:權重最佳化時產生錯誤"
+                    say_sth(f"Error:{err}", print_out=True)
+                    self.break_flag = True
+                    break
+
     def ae_eval_by_dataloader(self, dataloader,name='train'):
         loss = 0
-        dataloader.reset()
-        for batch_paths, batch_data in dataloader:
-            feed_dict = {self.tf_input: batch_data, self.tf_keep_prob: 1.0}
-            loss_temp = self.sess.run(self.loss_AE, feed_dict=feed_dict)
-            loss += loss_temp
 
-        loss /= dataloader.iterations
+        if self.break_flag is False:
+            dataloader.reset()
+            for batch_paths, batch_data in dataloader:
+                feed_dict = {self.tf_input: batch_data, self.tf_keep_prob: 1.0}
+                loss_temp = self.sess.run(self.loss_AE, feed_dict=feed_dict)
+                loss += loss_temp
 
-        if name == "train":
-            self.train_loss_list.append(float(loss))
-            self.log["train_loss_list"] = loss
-        else:
-            self.test_loss_list.append(float(loss))
-            self.log["test_loss_list"] = loss
+                #----check the break signal
+                self.break_flag = break_signal_check()
+                if self.break_flag:
+                    break
+
+            if self.break_flag:
+                loss /= (dataloader.ite_num + 1)
+            else:
+                loss /= dataloader.iterations
+
+            if name == "train":
+                self.train_loss_list.append(float(loss))
+                self.log["train_loss_list"] = loss
+            else:
+                self.test_loss_list.append(float(loss))
+                self.log["test_loss_list"] = loss
 
         return loss
 
@@ -1450,26 +1578,27 @@ class AE_Seg():
 
     def target_comparison_AE(self,loss_value,loss_method='ssim'):
         goal = False
-        target = self.AE_target_dict['value']
-        set_t = self.AE_target_dict['hit_target_times']
-        t = self.AE_target_dict['hit_times']
+        if self.break_flag is False:
+            target = self.AE_target_dict['value']
+            set_t = self.AE_target_dict['hit_target_times']
+            t = self.AE_target_dict['hit_times']
 
-        if loss_method == 'ssim':
-            if loss_value * 100 >= target:
-                t += 1
-        else:
-            if loss_value <= target:
-                t += 1
+            if loss_method == 'ssim':
+                if loss_value * 100 >= target:
+                    t += 1
+            else:
+                if loss_value <= target:
+                    t += 1
 
-        if t >= set_t:
-            goal = True
-        else:
-            self.AE_target_dict['hit_times'] = t
+            if t >= set_t:
+                goal = True
+            else:
+                self.AE_target_dict['hit_times'] = t
 
-        if goal:
-            msg = '模型訓練結束:\n{}已經達到設定目標:{}累積達{}次'.format(
-                 self.AE_target_dict['type'],target, set_t)
-            say_sth(msg, print_out=self.print_out)
+            if goal:
+                msg = '模型訓練結束:\n{}已經達到設定目標:{}累積達{}次'.format(
+                     self.AE_target_dict['type'],target, set_t)
+                say_sth(msg, print_out=self.print_out)
 
         return goal
 
@@ -1549,35 +1678,36 @@ class AE_Seg():
         return break_flag
 
     def performance_process_AE(self,epoch,loss_value,LV):
-        if self.loss_method == 'ssim':
-            new_value = np.round(loss_value * 100, 2)
-        else:
-            new_value = np.round(loss_value, 2)
-
-        if epoch == 0:
-            LV['record_value'] = new_value
-        else:
-            go_flag = False
+        if self.break_flag is False:
             if self.loss_method == 'ssim':
-                if new_value > LV['record_value']:
-                    go_flag = True
+                new_value = np.round(loss_value * 100, 2)
             else:
-                if new_value < LV['record_value']:
-                    go_flag = True
+                new_value = np.round(loss_value, 2)
 
-            if go_flag is True:
-                # ----delete the previous pb
-                if os.path.exists(LV['pb_save_path_old']):
-                    os.remove(LV['pb_save_path_old'])
-
-                # ----save the better one
-                pb_save_path = create_pb_path("infer_{}".format(new_value), self.save_dir,
-                                              to_encode=self.encript_flag)
-                save_pb_file(self.sess, self.pb_save_list, pb_save_path, encode=self.encript_flag,
-                             random_num_range=self.encode_num, header=self.encode_header)
-                # ----update record value
+            if epoch == 0:
                 LV['record_value'] = new_value
-                LV['pb_save_path_old'] = pb_save_path
+            else:
+                go_flag = False
+                if self.loss_method == 'ssim':
+                    if new_value > LV['record_value']:
+                        go_flag = True
+                else:
+                    if new_value < LV['record_value']:
+                        go_flag = True
+
+                if go_flag is True:
+                    # ----delete the previous pb
+                    if os.path.exists(LV['pb_save_path_old']):
+                        os.remove(LV['pb_save_path_old'])
+
+                    # ----save the better one
+                    pb_save_path = create_pb_path("infer_{}".format(new_value), self.save_dir,
+                                                  to_encode=self.encript_flag)
+                    save_pb_file(self.sess, self.pb_save_list, pb_save_path, encode=self.encript_flag,
+                                 random_num_range=self.encode_num, header=self.encode_header)
+                    # ----update record value
+                    LV['record_value'] = new_value
+                    LV['pb_save_path_old'] = pb_save_path
 
     def performance_process_SEG(self, epoch, new_value, LV):
         if epoch == 0:
@@ -1880,44 +2010,6 @@ class AE_Seg():
 
         return msg_list,header_list
 
-    def transmit_data2ui(self,epoch,print_out,**kwargs):
-        #----var
-        msg_list = list()
-        header_list = list()
-
-        for header,values in kwargs.items():
-            msg = ""
-            if isinstance(values,list) or isinstance(values,np.ndarray):
-                leng = len(values)
-                for i,value in enumerate(values):
-                    str_value = str(value)
-                    splits = str_value.split(".")
-
-                    if len(splits[-1]) > 8:
-                        msg += "{}.{}".format(splits[0],splits[-1][:8])
-                    else:
-                        msg += str_value
-
-
-
-                    # if value % 1.0 == 0:
-                    #     msg += str(value)
-                    # else:
-                    #     msg += "{:.8f}".format(value)
-
-                    if (i+1) < leng:
-                        msg += ','
-            elif isinstance(values,float):
-                msg = "{:.8f}".format(values)
-            else:
-                msg = str(values)
-
-            msg_list.append('{},{}'.format(epoch, msg))
-            header_list.append(header)
-
-        say_sth(msg_list, print_out=print_out, header=header_list)
-
-
     # def display_iou_acc(self,iou,acc,defect_recall,all_acc,id2name,name='',print_out=False):
     # def display_results(self,id2name,print_out,dataset_name,**kwargs):
     #     msg_list = []
@@ -2047,6 +2139,57 @@ class AE_Seg():
         # -----------------------------------------------------------------------
         # data= 64 x 64 x 3
         return net
+
+class Pipeline_modification():
+    # def __init__(self):
+    #     print("Pipeline_modification init")
+
+    def __call__(self, *args, **kwargs):
+        # model_type = kwargs.get('model_type')
+        config_dict = kwargs.get('config_dict')
+
+        #if model_type == "5":
+        self.__modify_type_5__(config_dict)
+        say_sth("execute type_5 Pipeline_modification",print_out=True)
+
+    def __modify_type_5__(self,config_dict):
+        dict_list = ['ae_var','seg_var']
+        key_list = ["train_pipelines","val_pipelines"]
+        model_shape = config_dict.get('model_shape')
+
+        h,w = model_shape[1:3]
+
+        for dict_name in dict_list:
+            var_dict = config_dict.get(dict_name)
+            if isinstance(var_dict,dict):
+                for key in key_list:
+                    if var_dict.get(key) is not None:
+                        self.height_width_check(var_dict[key],h,w)
+
+    def height_width_check(self,pipelines,height,width):
+        '''
+        dict(type='Resize', height=int(height*1.05), width=int(width*1.05)),
+        dict(type='RandomCrop', height=height, width=width),
+        '''
+        #----get all types
+        type_list = []
+        for p_dict in pipelines:
+            if p_dict.get('type') is not None:
+                type_list.append(p_dict['type'])
+
+        #----modify height and width
+        for p_dict in pipelines:
+            if p_dict.get('type') == 'Resize':
+                if "RandomCrop" in type_list:
+                    p_dict['height'] = int(height * 1.05)
+                    p_dict['width'] = int(width * 1.05)
+                else:
+                    p_dict['height'] = height
+                    p_dict['width'] = width
+            elif p_dict.get('type') == 'RandomCrop':
+                p_dict['height'] = height
+                p_dict['width'] = width
+
 # class AE_Seg():
 #     def __init__(self,para_dict):
 #

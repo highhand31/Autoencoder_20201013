@@ -366,5 +366,5 @@ if __name__ == "__main__":
     AE_Seg_train = AE_Seg(para_dict)
     # AE_Seg_train = AE_Seg_v2(para_dict)
     if AE_Seg_train.status:
-        AE_Seg_train.model_init(para_dict)
-        AE_Seg_train.train(para_dict)
+        AE_Seg_train.model_init()
+        AE_Seg_train.train()
