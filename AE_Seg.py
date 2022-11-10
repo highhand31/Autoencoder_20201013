@@ -402,21 +402,26 @@ def update_dict(new_dict,old_dict):
 def get_paths(img_source,ext=None):
     # ----var
     paths = list()
-    if img_source is not None:
-        if not isinstance(img_source, list):
-            img_source = [img_source]
+    try:
+        if img_source is not None:
+            if not isinstance(img_source, list):
+                img_source = [img_source]
 
-        if isinstance(ext,str):
-            ext_list = [ext]
-        else:
-            ext_list = img_format
-
-        for img_dir in img_source:
-            temp = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in ext_list]
-            if len(temp) == 0:
-                say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir))
+            if isinstance(ext,str):
+                ext_list = [ext]
             else:
-                paths.extend(temp)
+                ext_list = img_format
+
+            for img_dir in img_source:
+                temp = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in ext_list]
+                if len(temp) == 0:
+                    say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir))
+                else:
+                    paths.extend(temp)
+    except Exception as err:
+        paths = list()
+        print(f"Warning:{err}")
+
 
     return np.array(paths),len(paths)
 
@@ -428,6 +433,20 @@ def break_signal_check():
                 break_flag = True
 
     return break_flag
+
+def display_results(class_names,print_out,**kwargs):
+    msg_list = []
+    for k,v in kwargs.items():
+            if isinstance(v,list):
+                msg_list.append(f"{k}:")
+                if class_names is not None:
+                    msg_list.append("{}:".format(class_names))
+                msg_list.append("{}".format(v))
+            else:
+                msg_list.append(f"{k}: {v}")
+
+    for msg in msg_list:
+        say_sth(msg,print_out=print_out)
 
 
 
@@ -1149,7 +1168,7 @@ class AE_Seg():
                         #----display training results
                         msg = "\n----訓練週期 {} 與相關結果如下----".format(epoch)
                         say_sth(msg, print_out=print_out)
-                        self.display_results(None, print_out,
+                        display_results(None, print_out,
                                              train_AE_loss=train_loss,
                                              val_AE_loss=test_loss,
                                              )
@@ -1279,12 +1298,12 @@ class AE_Seg():
 
                             msg = "\n----訓練週期 {} 與相關結果如下----".format(epoch)
                             say_sth(msg, print_out=print_out)
-                            self.display_results(None,print_out,
+                            display_results(None,print_out,
                                                  train_SEG_loss=train_loss_seg,
                                                  val_SEG_loss=test_loss_seg,
                                                  )
 
-                            self.display_results(class_names, print_out,
+                            display_results(class_names, print_out,
                                                  train_SEG_iou=train_iou_seg,
                                                  val_SEG_iou=test_iou_seg,
                                                  train_SEG_accuracy=train_acc_seg,
@@ -2030,15 +2049,15 @@ class AE_Seg():
     #
     #     for msg in msg_list:
     #         say_sth(msg,print_out=print_out)
-    def display_results(self,class_names,print_out,**kwargs):
-        msg_list = []
-        for key,value_list in kwargs.items():
-                msg_list.append(f"{key}:")
-                if class_names is not None:
-                    msg_list.append("{}:".format(class_names))
-                msg_list.append("{}:".format(value_list))
-        for msg in msg_list:
-            say_sth(msg,print_out=print_out)
+    # def display_results(self,class_names,print_out,**kwargs):
+    #     msg_list = []
+    #     for key,value_list in kwargs.items():
+    #             msg_list.append(f"{key}:")
+    #             if class_names is not None:
+    #                 msg_list.append("{}:".format(class_names))
+    #             msg_list.append("{}:".format(value_list))
+    #     for msg in msg_list:
+    #         say_sth(msg,print_out=print_out)
 
     #----models
 
