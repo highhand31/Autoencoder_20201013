@@ -1,4 +1,5 @@
 from AE_Seg import AE_Seg
+from Seg import Seg
 # from AE_Seg import AE_Seg_v2
 
 def get_AE_arg(**kwargs):
@@ -346,7 +347,7 @@ if __name__ == "__main__":
         preprocess_dict = {'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0},
         epochs=4,
         GPU_ratio=None,
-        save_dir=r"D:\code\model_saver\AE_Seg_test",
+        save_dir=r"D:\code\model_saver\AE_Seg_test_2",
         to_fix_ae=True,
         to_fix_seg=False,
         encript_flag=False,

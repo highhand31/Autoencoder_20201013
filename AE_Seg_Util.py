@@ -6503,7 +6503,7 @@ if __name__ == "__main__":
     # img_mask(img_source, json_path,zoom_in_value=[75,77,88,88], img_type='path')
 
     #----check results
-    dir_path = r"D:\code\model_saver\AE_Seg_149_複製"
+    dir_path = r"D:\code\model_saver\AE_Seg_150"
     # dir_path = r"C:\Users\User\Desktop\train_result"
     # dir_path = r"D:\code\model_saver\AE_Seg_139"
     # only2see = ['seg_test_defect_sensitivity_list']
