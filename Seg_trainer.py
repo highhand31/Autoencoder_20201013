@@ -2,6 +2,7 @@ from Seg import Seg
 
 def get_tempalte_config(**kwargs):
     # ----SEG
+    tech_type = "type_4"
     height = 128
     width = 128
     seg_var = dict()
@@ -9,7 +10,7 @@ def get_tempalte_config(**kwargs):
         defect_num=1,
         defect_png_source=[
             r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\train\defectCrop2png\hole",
-            r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_AOI_NG\defectCrop2png\hole"
+            r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\20220818_AOI_NG\defectCrop2png\hole"
         ],
         label_class=1, p=0.6,
     )
@@ -52,11 +53,11 @@ def get_tempalte_config(**kwargs):
     seg_var['train_pipelines'] = [
         dict(type='CvtColor', to_rgb=True),
         dict(type='RandomBlur', p=p),
-        # dict(type='RandomVividDefect', **hole_dict),
-        # dict(type='RandomVividDefect', **gold_particle_dict),
-        # dict(type='RandomVividDefect', **particle_dict),
-        # dict(type='RandomVividDefect', **defect_but_ok_dict),
-        # dict(type='RandomVividLightDefect', **light_defect_but_ok_dict),
+        dict(type='RandomVividDefect', **hole_dict),
+        dict(type='RandomVividDefect', **gold_particle_dict),
+        dict(type='RandomVividDefect', **particle_dict),
+        dict(type='RandomVividDefect', **defect_but_ok_dict),
+        dict(type='RandomVividLightDefect', **light_defect_but_ok_dict),
         dict(type='RandomBrightnessContrast', br_ratio=0.1, ct_ratio=0.3, p=p),
         # dict(type='RandomDefect', area_range=area_range, defect_num=1, pixel_range=[200, 250], zoom_in=zoom_in, p=p,
         #      label_class=0),
@@ -79,8 +80,14 @@ def get_tempalte_config(**kwargs):
         dict(type='Norm')
     ]
 
+    kernel_list = [5, 5, 3, 3, 3]
+    filter_list = [32, 48, 64, 80, 96]
+    stride_list = [2] * len(kernel_list)
+    pool_kernel_list = [3] * len(kernel_list)
+    multi_ratio = 1
     # seg_var['infer_method'] = "Seg_pooling_net_V10"#'Seg_pooling_net_V4'#'mit_b0'#'Seg_pooling_net_V4'#'Seg_DifNet'
-    seg_var['model_name'] = "type_5_8"
+    seg_var['tech_type'] = tech_type
+    seg_var['model_name'] = "type_4_1"
     seg_var['encode_dict'] = {
         "first_layer": {
             # "type": "dilated_downSampling",
@@ -88,20 +95,21 @@ def get_tempalte_config(**kwargs):
             # "filter": 8,
             # "ratio": [1, 2, 5]
         },
-        'kernel_list': [3] * 5,
-        'filter_list': [32, 48, 64, 80, 96],
-        'stride_list': [2] * 5,
+        'to_gray': True,
+        'kernel_list': kernel_list,
+        'filter_list': filter_list,
+        'stride_list': stride_list,
         'pool_type_list': ['max','resize','cnn'],
-        'pool_kernel_list': [3] * 5,  # [5, 5, 5, 5],
-        'multi_ratio': 1,
+        'pool_kernel_list': pool_kernel_list,  # [5, 5, 5, 5],
+        'multi_ratio': multi_ratio,
         'activation': 'relu'
     }
     seg_var['decode_dict'] = {
         'cnn_type': '',
-        'kernel_list': [3] * 5,
-        'filter_list': [96, 80, 64, 48, 32],
-        'stride_list': [2] * 5,  # [2, 2, 2, 2],
-        'multi_ratio': 1,
+        'kernel_list': kernel_list[::-1],
+        'filter_list': filter_list[::-1],
+        'stride_list': stride_list,  # [2, 2, 2, 2],
+        'multi_ratio': multi_ratio,
         'activation': 'relu'
     }
     seg_var['loss_method'] = "cross_entropy"
@@ -115,7 +123,7 @@ def get_tempalte_config(**kwargs):
     seg_var['learning_rate'] = 1e-4
     seg_var['epochs'] = 200
     # ----train
-    seg_var['eval_epochs'] = 2
+    seg_var['eval_epochs'] = 4
     seg_var['GPU_ratio'] = None
 
     seg_var['save_pb_name'] = 'infer'
@@ -133,6 +141,7 @@ def get_tempalte_config(**kwargs):
 
 def set_user_config(**kwargs):
     seg_dict = dict()
+    seg_dict['model_name'] = "type_4_1"
     seg_dict['height'] = 512
     seg_dict['width'] = 832
     seg_dict['train_img_seg_dir'] = [
@@ -141,7 +150,8 @@ def set_user_config(**kwargs):
         r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\20220408新增破洞+金顆粒 資料\2\train"
     ]
     seg_dict['test_img_seg_dir'] = [
-        r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\test"
+        r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\test",
+        # r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\ori"
     ]
 
     # seg_dict['predict_img_dir'] = [
@@ -149,11 +159,14 @@ def set_user_config(**kwargs):
     # ]
 
     seg_dict['id2class_name'] = r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\classnames.txt"
-    seg_dict["epochs"] = 96
-    seg_dict["save_dir"] = r"D:\code\model_saver\AE_Seg_test_3"
+    seg_dict["epochs"] = 2
+    seg_dict["save_dir"] = r"D:\code\model_saver\Seg_3"
 
     seg_dict["encript_flag"] = False
     seg_dict["print_out"] = True
+
+    for k, v in kwargs.items():
+        seg_dict[k] = v
 
     return seg_dict
 

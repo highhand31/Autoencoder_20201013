@@ -1,6 +1,7 @@
-import cv2,sys,shutil,os,json,time,math,imgviz,copy
+# import cv2,sys,shutil,os,json,time,math,imgviz,copy
+import os,json,time,math,copy
 import numpy as np
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import tensorflow
 if tensorflow.__version__.startswith('1.'):
     import tensorflow as tf
@@ -10,7 +11,7 @@ else:
     import tensorflow.compat.v1 as tf
     tf.disable_v2_behavior()
     import tensorflow.compat.v1.gfile as gfile
-print(tf.__version__)
+# print(tf.__version__)
 # sys.path.append(r'G:\我的雲端硬碟\Python\Code\Pycharm\utility')
 import AE_Seg_Util
 # from AE_Seg_Util import Seg_performance,get_classname_id_color,\
@@ -22,8 +23,8 @@ import models_Seg
 #     AE_pooling_net_V5,AE_dense_sampling,AE_pooling_net_V6,AE_pooling_net_V7,Seg_pooling_net_V4,Seg_pooling_net_V7,\
 #     Seg_pooling_net_V8,Seg_pooling_net_V9,AE_pooling_net_V8,Seg_pooling_net_V10
 
-import config_mit
-from models_MiT import MixVisionTransformer,MiTDecoder
+# import config_mit
+# from models_MiT import MixVisionTransformer,MiTDecoder
 
 
 print_out = True
@@ -358,7 +359,7 @@ def create_pb_path(save_pb_name, save_dir, to_encode=False,add_name_tail=False):
     if to_encode:
         ext = 'nst'
 
-    if add_name_tail is True:
+    if add_name_tail:
         name_tailer = get_time4tailer()
         pb_save_path = "{}_{}.{}".format(save_pb_name, name_tailer, ext)
     else:
@@ -366,21 +367,24 @@ def create_pb_path(save_pb_name, save_dir, to_encode=False,add_name_tail=False):
 
     return os.path.join(save_dir, pb_save_path)
 
-def create_log_path(save_dir,to_encode=False,filename='train_result'):
-    count = 0
-    ext = "json"
+def create_save_dir(save_dir):
+    if isinstance(save_dir,str):
+        pass
+    else:
+        msg = "輸入的權重資料夾路徑有誤，系統自動建立資料夾!"
+        say_sth(msg,print_out=True)
 
-    if to_encode:
-        ext = "nst"
+        #----create a default save dir
+        save_dir = os.path.join(os.getcwd(),"model_saver")
 
-    for i in range(1000):
-        log_path = "{}_{}.{}".format(filename, count, ext)
-        log_path = os.path.join(save_dir, log_path)
-        if not os.path.exists(log_path):
-            break
-        count += 1
+    if os.path.exists(save_dir):
+        msg = "儲存權重資料夾已存在:{}".format(save_dir)
+    else:
+        os.makedirs(save_dir)
+        msg = "儲存權重資料夾已建立:{}".format(save_dir)
+    say_sth(msg,print_out=True)
 
-    return log_path
+    return save_dir
 
 def get_time4tailer():
     xtime = time.localtime()
@@ -403,7 +407,9 @@ def get_paths(img_source,ext=None):
     # ----var
     paths = list()
     try:
-        if img_source is not None:
+        if img_source is None:
+            say_sth("Warning: 沒有輸入資料夾路徑",print_out=True)
+        else:
             if not isinstance(img_source, list):
                 img_source = [img_source]
 
@@ -414,14 +420,15 @@ def get_paths(img_source,ext=None):
 
             for img_dir in img_source:
                 temp = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in ext_list]
-                if len(temp) == 0:
-                    say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir))
-                else:
+                if len(temp) > 0:
                     paths.extend(temp)
+
+            #----path qty check
+            if len(paths) == 0:
+                say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir),print_out=True)
     except Exception as err:
         paths = list()
         print(f"Warning:{err}")
-
 
     return np.array(paths),len(paths)
 
@@ -448,10 +455,50 @@ def display_results(class_names,print_out,**kwargs):
     for msg in msg_list:
         say_sth(msg,print_out=print_out)
 
+class TrainLog():
+    def __init__(self,save_dir,to_encode=False,filename='train_result',
+                 cut_num_range=30,random_num_range=10):
+        self.save_dir = save_dir
+        self.to_encode = to_encode
+        self.filename = filename
+        self.content = dict()
+        self.cut_num_range = cut_num_range
+        self.random_num_range = random_num_range
+        self.create_log_path()
 
+    def create_log_path(self,):
+        count = 0
+        ext = "json"
 
+        if self.to_encode:
+            ext = "nst"
 
-#----main class
+        while(True):
+            log_path = "{}_{}.{}".format(self.filename, count, ext)
+            log_path = os.path.join(self.save_dir, log_path)
+            if not os.path.exists(log_path):
+                say_sth("本次建立的log路徑:{}".format(log_path),print_out=True)
+                break
+            count += 1
+
+        self.log_path = log_path
+
+    def update(self,**kwargs):
+        for k,v in kwargs.items():
+            self.content[k] = v
+
+    def save(self):
+        with open(self.log_path, 'w') as f:
+            json.dump(self.content, f)
+
+        if self.to_encode:
+            if os.path.exists(self.log_path):
+                file_transfer(self.log_path, cut_num_range=self.cut_num_range,
+                              random_num_range=self.random_num_range)
+
+        msg = "儲存訓練結果數據至{}".format(self.log_path)
+        say_sth(msg, print_out=True)
+
 class Seg():
     def __init__(self,para_dict,user_dict=None):
 
@@ -460,8 +507,8 @@ class Seg():
             para_dict = self.update_config_dict(user_dict,para_dict)
 
         #----common var
-        print_out = para_dict.get('print_out')
-        self.print_out = print_out
+        self.print_out = para_dict.get('print_out')
+        self.encript_flag = para_dict.get('encript_flag')
 
         #----SEG process
         train_img_seg_dir = para_dict.get('train_img_seg_dir')
@@ -482,184 +529,51 @@ class Seg():
                  SEG驗證集=self.seg_test_qty,
                  # SEG預測集=self.seg_predict_qty
                  ))
-        to_train_seg = qty_status_list[0]
+        to_train_seg = np.all(qty_status_list)
 
         #----read class names
-        classname_id_color_dict = AE_Seg_Util.get_classname_id_color_v2(id2class_name,print_out=print_out)
+        classname_id_color_dict = AE_Seg_Util.get_classname_id_color_v2(id2class_name,print_out=self.print_out)
 
         # ----train with AE ok images
         # self.seg_path_change_process(to_train_w_AE_paths, to_train_ae, select_OK_ratio=select_OK_ratio)
 
-        #----log update
-        log = classname_id_color_dict.copy()
-
         #----local var to global
         self.para_dict = para_dict
         self.status = to_train_seg
-        self.log = log
         # self.train_img_seg_dir = train_img_seg_dir
         # self.test_img_seg_dir = test_img_seg_dir
         # self.predict_img_dir = predict_img_dir
         self.classname_id_color_dict = classname_id_color_dict
+        self.class_num = len(classname_id_color_dict['class_names'])
 
     def model_init(self):
-        #----var parsing
-        para_dict = self.para_dict
-        # ----use previous settings
-        if para_dict.get('use_previous_settings'):
-            if isinstance(self.para_dict,dict):
-                para_dict = self.para_dict
+        #----ver parsing
 
-        #----common var
-        model_shape = [None,para_dict['height'],para_dict['width'],3]
-        lr = para_dict['learning_rate']
-        save_dir = para_dict['save_dir']
-        save_pb_name = para_dict.get('save_pb_name')
-        encript_flag = para_dict.get('encript_flag')
-        print_out = para_dict.get('print_out')
-        add_name_tail = para_dict.get('add_name_tail')
-        dtype = para_dict.get('dtype')
-        model_type = "type_5"
-
-        #----var
-        acti_dict = {'relu': tf.nn.relu, 'mish': models_Seg.tf_mish, None: tf.nn.relu}
-        pb_save_list = list()
-
-        #----var process
-        if add_name_tail is None:
-            add_name_tail = True
-        if dtype is None:
-            dtype = 'float32'
-
-
-        #----Seg inference selection
-        infer_method4Seg = para_dict.get('infer_method')
-        model_name4seg = para_dict.get('model_name')
-        # filter_list4Seg = para_dict['filter_list']
-        # loss_method4Seg = para_dict.get('loss_method')
-        # opti_method4Seg = para_dict.get('opti_method')
-        acti_seg = para_dict.get('activation')
-        self.class_num = len(self.classname_id_color_dict['class_names'])
-
-        #----tf_placeholder declaration
-        tf_input = tf.placeholder(dtype, shape=model_shape, name='input')
-        tf_keep_prob = tf.placeholder(dtype=dtype, name="keep_prob")
-        tf_input_recon = tf.placeholder(dtype, shape=model_shape, name='input_recon')
-        tf_label_batch = tf.placeholder(tf.int32, shape=model_shape[:-1], name='label_batch')
-        tf_dropout = tf.placeholder(dtype=tf.float32, name="dropout")
-
-        # ----activation selection
-        acti_func = acti_dict[acti_seg]
-
-        #----filer scaling process
-        # filter_list4Seg = np.array(filter_list4Seg)
-        # if para_dict.get('scaler') is not None:
-        #     filter_list4Seg /= para_dict.get('scaler')
-        #     filter_list4Seg = filter_list4Seg.astype(np.uint16)
-
-        #----AIE model mapping
-        if model_name4seg is not None:
-            if model_name4seg.find(model_type) >= 0:
-                infer_method4Seg = "Seg_pooling_net_V" + model_name4seg.split("_")[-1]
-
-        #----Seg model selection
-        if infer_method4Seg == 'Seg_pooling_net_V8':
-            logits_Seg = models_Seg.Seg_pooling_net_V8(tf_input, para_dict['encode_dict'],
-                                                       para_dict['decode_dict'],
-                                                       out_channel=self.class_num,
-                                                       print_out=print_out)
-            softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
-            prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
-            prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
-        elif infer_method4Seg == 'Seg_pooling_net_V9':
-            logits_Seg = models_Seg.Seg_pooling_net_V9(tf_input, tf_input_recon, para_dict['encode_dict'],
-                                            para_dict['decode_dict'],
-                                            to_reduce=para_dict.get('to_reduce'), out_channel=self.class_num,
-                                            print_out=print_out)
-            softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
-            prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
-            prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
-        elif infer_method4Seg == 'Seg_pooling_net_V10':
-            logits_Seg = models_Seg.Seg_pooling_net_V10(tf_input, tf_input_recon, para_dict['encode_dict'],
-                                            para_dict['decode_dict'],
-                                            to_reduce=para_dict.get('to_reduce'), out_channel=self.class_num,
-                                            print_out=print_out)
-            softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
-            prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
-            prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
-        else:
-            if model_name4seg is not None:
-                display_name = model_name4seg
-            else:
-                display_name = infer_method4Seg
-            say_sth(f"Error:Seg model doesn't exist-->{display_name}", print_out=True)
-
-        #----Seg loss method selection
-        # if loss_method4Seg == "cross_entropy":
-        loss_Seg = tf.reduce_mean(v2.nn.sparse_softmax_cross_entropy_with_logits(tf_label_batch,logits_Seg),name='loss_Seg')
-
-        #----Seg optimizer selection
-        # if opti_method4Seg == "adam":
-        opt_Seg = tf.train.AdamOptimizer(learning_rate=lr).minimize(loss_Seg)
-
-
-        # ----appoint PB node names
-        pb_save_list.extend(['predict_Seg'])
-
-        # ----pb filename(common)
-        pb_save_path = create_pb_path(save_pb_name, save_dir,
-                                      to_encode=encript_flag,add_name_tail=add_name_tail)
+        self.infer_init(**self.para_dict)
 
         # ----create the dir to save model weights(CKPT, PB)
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
+        save_dir = create_save_dir(self.para_dict['save_dir'])
+
+        # ----pb filename(common)
+        pb_save_path = create_pb_path(self.para_dict.get('save_pb_name'), save_dir,
+                                      to_encode=self.encript_flag,add_name_tail=self.para_dict.get('add_name_tail'))
 
         #----save SEG coloer index image
         _ = AE_Seg_Util.draw_color_index(self.classname_id_color_dict['class_names'], save_dir=save_dir)
 
-        # if self.seg_predict_qty > 0:
-        #     new_dir_name = "img_seg-" + os.path.basename(save_dir)
-        #     #----if recon_img_dir is list format
-        #     if isinstance(self.predict_img_dir,list):
-        #         dir_path = self.predict_img_dir[0]
-        #     else:
-        #         dir_path = self.predict_img_dir
-        #     self.new_predict_dir = os.path.join(dir_path, new_dir_name)
-        #     if not os.path.exists(self.new_predict_dir):
-        #         os.makedirs(self.new_predict_dir)
-
         self.out_dir_prefix = os.path.join(save_dir, "model")
-        saver = tf.train.Saver(max_to_keep=2)
+        self.saver = tf.train.Saver(max_to_keep=2)
 
-        # ----create the log(JSON)
-        log_path = create_log_path(save_dir,to_encode=encript_flag,filename="train_result")
-        self.log['pb_save_list'] = pb_save_list
-        self.log = update_dict(self.log,para_dict)
+        #----create train log module
+        self.log = TrainLog(save_dir,to_encode=self.encript_flag,filename="train_result")
+        self.log.update(**self.para_dict)
+        self.log.update(**self.classname_id_color_dict)
+        self.log.update(pb_save_list=self.pb_save_list)
 
         # ----local var to global
-        self.model_shape = model_shape
-        self.tf_input = tf_input
-        self.tf_keep_prob = tf_keep_prob
-        self.saver = saver
         self.save_dir = save_dir
         self.pb_save_path = pb_save_path
-        self.encript_flag = encript_flag
-        self.pb_save_list = pb_save_list
         # self.pb_extension = pb_extension
-        self.log_path = log_path
-        self.dtype = dtype
-
-        self.tf_label_batch = tf_label_batch
-        self.tf_prediction_Seg = prediction_Seg
-        self.infer_method4Seg = infer_method4Seg
-        self.logits_Seg = logits_Seg
-        self.loss_Seg = loss_Seg
-        self.opt_Seg = opt_Seg
-        self.prediction_Seg = prediction_Seg
-        # self.loss_method4Seg = loss_method4Seg
-        # self.pb4seg_save_path = pb4seg_save_path
-        self.tf_dropout = tf_dropout
-        self.infer_method4Seg = infer_method4Seg
 
     def train(self):
         para_dict = self.para_dict
@@ -668,19 +582,11 @@ class Seg():
         epochs = para_dict['epochs']
         GPU_ratio = para_dict.get('GPU_ratio')
         print_out = para_dict.get('print_out')
-        encode_header = para_dict.get('encode_header')
-        encode_num = para_dict.get('encode_num')
-        encript_flag = para_dict.get('encript_flag')
         eval_epochs = para_dict.get('eval_epochs')
 
         save_period = para_dict.get('save_period')
 
-        if encode_header is None:
-            encode_header = [24,97,28,98]
-        if encode_num is None:
-            encode_num = 87
-        self.encode_header = encode_header
-        self.encode_num = encode_num
+        self.encode_header_process(para_dict.get('encode_header'),para_dict.get('encode_num'))
 
         if save_period is None:
             save_period = 1
@@ -732,17 +638,16 @@ class Seg():
 
         #titles = ['prediction', 'answer']
         # batch_size_seg_test = batch_size_seg
-        self.seg_p = AE_Seg_Util.Seg_performance(print_out=print_out)
+        self.seg_p = AE_Seg_Util.Seg_performance(print_out=self.print_out)
         self.seg_p.set_classname_id_color(**self.classname_id_color_dict)
 
         self.set_time_start()
 
         #----GPU setting
-        config = GPU_setting(GPU_ratio)
-        self.sess = tf.Session(config=config)
+        self.sess = tf.Session(config=GPU_setting(GPU_ratio))
         # with tf.Session(config=config) as sess:
-        status = weights_check(self.sess, self.saver, self.save_dir, encript_flag=encript_flag,
-                               encode_num=encode_num, encode_header=encode_header)
+        status = weights_check(self.sess, self.saver, self.save_dir, encript_flag=self.encript_flag,
+                               encode_num=self.encode_num, encode_header=self.encode_header)
         if status is False:
             self.error_dict['GPU_resource_error'] = True
         else:
@@ -857,39 +762,109 @@ class Seg():
                     self.record_time()
 
                     #----save the log
-                    self.save_log()
-
+                    self.log.save()
 
         #----error messages
         if True in list(self.error_dict.values()):
             for key, value in self.error_dict.items():
                 if value is True:
-                    say_sth('', print_out=print_out, header=key)
+                    say_sth('', print_out=self.print_out, header=key)
 
         #----close the session
         self.sess.close()
-            # say_sth('AI Engine結束!!期待下次再相見', print_out=print_out, header='AIE_end')
 
     #----functions
+    def infer_init(self,**kwargs):
+        model_shape = [None, kwargs['height'], kwargs['width'], 3]
+        infer_method4Seg = kwargs.get('infer_method')
+        model_name = kwargs.get('model_name')
+        tech_type = kwargs.get('tech_type')
+        lr = kwargs['learning_rate']
+        dtype = kwargs.get('dtype')
+        print_out = kwargs.get('print_out')
+        pb_save_list = list()
+        if dtype is None:
+            dtype = 'float32'
+
+
+        # ----tf_placeholder declaration
+        tf_input = tf.placeholder(dtype, shape=model_shape, name='input')
+        tf_keep_prob = tf.placeholder(dtype=dtype, name="keep_prob")
+        tf_input_recon = tf.placeholder(dtype, shape=model_shape, name='input_recon')
+        tf_label_batch = tf.placeholder(tf.int32, shape=model_shape[:-1], name='label_batch')
+        tf_dropout = tf.placeholder(dtype=tf.float32, name="dropout")
+
+        # ----AIE model mapping
+        if model_name is not None:
+            if model_name.find(tech_type) >= 0:
+                infer_method4Seg = "Seg_pooling_net_V" + model_name.split("_")[-1]
+
+        # ----Seg model selection
+        if infer_method4Seg == 'Seg_pooling_net_V8':
+            logits_Seg = models_Seg.Seg_pooling_net_V8(tf_input, tf_input, kwargs['encode_dict'],
+                                                       kwargs['decode_dict'],
+                                                       out_channel=self.class_num,
+                                                       print_out=print_out)
+            softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
+            prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
+            prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
+        elif infer_method4Seg == 'Seg_pooling_net_V1':
+            logits_Seg = models_Seg.Seg_pooling_net_V1(tf_input, kwargs['encode_dict'],
+                                                       kwargs['decode_dict'],
+                                                       out_channel=self.class_num,
+                                                       print_out=print_out)
+            softmax_Seg = tf.nn.softmax(logits_Seg, name='softmax_Seg')
+            prediction_Seg = tf.argmax(softmax_Seg, axis=-1, output_type=tf.int32)
+            prediction_Seg = tf.cast(prediction_Seg, tf.uint8, name='predict_Seg')
+        else:
+            if model_name is not None:
+                display_name = model_name
+            else:
+                display_name = infer_method4Seg
+            say_sth(f"Error:Seg model doesn't exist-->{display_name}", print_out=True)
+
+        loss_Seg = tf.reduce_mean(v2.nn.sparse_softmax_cross_entropy_with_logits(tf_label_batch, logits_Seg),
+                                  name='loss_Seg')
+        opt_Seg = tf.train.AdamOptimizer(learning_rate=lr).minimize(loss_Seg)
+
+        pb_save_list.extend(['predict_Seg'])
+
+        self.model_shape = model_shape
+        self.tf_input = tf_input
+        self.tf_keep_prob = tf_keep_prob
+        self.dtype = dtype
+        self.tf_label_batch = tf_label_batch
+        self.tf_prediction_Seg = prediction_Seg
+        self.infer_method4Seg = infer_method4Seg
+        self.logits_Seg = logits_Seg
+        self.loss_Seg = loss_Seg
+        self.opt_Seg = opt_Seg
+        self.prediction_Seg = prediction_Seg
+        # self.loss_method4Seg = loss_method4Seg
+        # self.pb4seg_save_path = pb4seg_save_path
+        self.tf_dropout = tf_dropout
+        self.infer_method4Seg = infer_method4Seg
+        self.pb_save_list = pb_save_list
+
+    def encode_header_process(self,encode_header,encode_num):
+        if isinstance(encode_header,list):
+            self.encode_header = encode_header
+        else:
+            self.encode_header = [24,97,28,98]
+
+        if isinstance(encode_num,int):
+            self.encode_num = encode_num
+        else:
+            self.encode_num = 87
+
     def update_config_dict(self,new_dict, ori_dict):
 
         combine_dict = update_dict(new_dict, ori_dict)
         # ----pipeline modification
-        p = Pipeline_modification()
+        p = Seg_pipeline_modification()
         p(config_dict=combine_dict)
 
         return combine_dict
-
-    def save_log(self):
-        with open(self.log_path, 'w') as f:
-            json.dump(self.log, f)
-
-        if self.encript_flag is True:
-            if os.path.exists(self.log_path):
-                file_transfer(self.log_path, cut_num_range=30, random_num_range=10)
-
-        msg = "儲存訓練結果數據至{}".format(self.log_path)
-        say_sth(msg, print_out=True)
 
     def save_ckpt_and_pb(self,epoch):
         model_save_path = self.saver.save(self.sess, self.out_dir_prefix, global_step=epoch)
@@ -957,9 +932,9 @@ class Seg():
                 if self.break_flag:
                     break
 
-            iou_seg, acc_seg, all_acc_seg = self.seg_p.cal_iou_acc(save_dict=self.log,name=name)
-            defect_recall = self.seg_p.cal_defect_recall(save_dict=self.log, name=name)
-            defect_sensitivity = self.seg_p.cal_defect_sensitivity(save_dict=self.log, name=name)
+            iou_seg, acc_seg, all_acc_seg = self.seg_p.cal_iou_acc(save_dict=self.log.content,name=name)
+            defect_recall = self.seg_p.cal_defect_recall(save_dict=self.log.content, name=name)
+            defect_sensitivity = self.seg_p.cal_defect_sensitivity(save_dict=self.log.content, name=name)
 
             if self.break_flag:
                 seg_loss /= (dataloader.ite_num + 1)
@@ -969,10 +944,12 @@ class Seg():
             #----
             if name == 'train':
                 self.seg_train_loss_list.append(float(seg_loss))
-                self.log["seg_train_loss_list"] = self.seg_train_loss_list
+                self.log.update(seg_train_loss_list=self.seg_train_loss_list)
+                # self.log["seg_train_loss_list"] = self.seg_train_loss_list
             else:
                 self.seg_test_loss_list.append(float(seg_loss))
-                self.log["seg_test_loss_list"] = self.seg_test_loss_list
+                self.log.update(seg_test_loss_list=self.seg_test_loss_list)
+                # self.log["seg_test_loss_list"] = self.seg_test_loss_list
 
         return seg_loss,iou_seg,acc_seg,defect_recall,defect_sensitivity
 
@@ -982,8 +959,10 @@ class Seg():
         total_train_time = now_time - self.t_train_start
 
         self.epoch_time_list.append(d_t)
-        self.log['total_train_time'] = float(total_train_time)
-        self.log['ave_epoch_time'] = float(np.average(self.epoch_time_list))
+        self.log.update(total_train_time=float(total_train_time))
+        self.log.update(ave_epoch_time=float(np.average(self.epoch_time_list)))
+        # self.log['total_train_time'] = float(total_train_time)
+        # self.log['ave_epoch_time'] = float(np.average(self.epoch_time_list))
 
         msg_list = []
         msg_list.append("此次訓練所花時間: {}秒".format(np.round(d_t, 2)))
@@ -996,32 +975,6 @@ class Seg():
 
     def set_epoch_start_time(self):
         self.epoch_start_time = time.time()
-
-    def target_comparison_AE(self,loss_value,loss_method='ssim'):
-        goal = False
-        if self.break_flag is False:
-            target = self.AE_target_dict['value']
-            set_t = self.AE_target_dict['hit_target_times']
-            t = self.AE_target_dict['hit_times']
-
-            if loss_method == 'ssim':
-                if loss_value * 100 >= target:
-                    t += 1
-            else:
-                if loss_value <= target:
-                    t += 1
-
-            if t >= set_t:
-                goal = True
-            else:
-                self.AE_target_dict['hit_times'] = t
-
-            if goal:
-                msg = '模型訓練結束:\n{}已經達到設定目標:{}累積達{}次'.format(
-                     self.AE_target_dict['type'],target, set_t)
-                say_sth(msg, print_out=self.print_out)
-
-        return goal
 
     def seg_path_change_process(self,to_train_w_AE_paths,to_train_ae,select_OK_ratio=0.2):
         if to_train_w_AE_paths:
@@ -1050,53 +1003,6 @@ class Seg():
         say_sth(msg_list,print_out=self.print_out)
 
         return status_list
-
-    def receive_msg_process(self,sess,epoch,encript_flag=True):
-        break_flag = False
-        if SockConnected:
-            # print(Sock.Message)
-            if len(Sock.Message):
-                if Sock.Message[-1][:4] == "$S00":
-                    # Sock.send("Protocol:Ack\n")
-                    model_save_path = self.saver.save(sess, self.out_dir_prefix, global_step=epoch)
-                    # ----encode ckpt file
-                    if encript_flag:
-                        file = model_save_path + '.meta'
-                        if os.path.exists(file):
-                            file_transfer(file, random_num_range=self.encode_num, header=self.encode_header)
-                        else:
-                            msg = "Warning:找不到權重檔:{}進行處理".format(file)
-                            say_sth(msg, print_out=print_out)
-                        # data_file = [file.path for file in os.scandir(self.save_dir) if
-                        #              file.name.split(".")[-1] == 'data-00000-of-00001']
-                        data_file = model_save_path + '.data-00000-of-00001'
-                        if os.path.exists(data_file):
-                            file_transfer(data_file, random_num_range=self.encode_num, header=self.encode_header)
-                        else:
-                            msg = "Warning:找不到權重檔:{}進行處理".format(data_file)
-                            say_sth(msg, print_out=print_out)
-
-                    # msg = "儲存訓練權重檔至{}".format(model_save_path)
-                    # say_sth(msg, print_out=print_out)
-                    save_pb_file(sess, self.pb_save_list, self.pb_save_path, encode=encript_flag,
-                                 random_num_range=self.encode_num, header=self.encode_header)
-                    break_flag = True
-
-        return break_flag
-
-    def read_manual_cmd(self,to_read_manual_cmd):
-        break_flag = False
-        if to_read_manual_cmd:
-            j_path = os.path.join(self.save_dir, 'manual_cmd.json')
-            if os.path.exists(j_path):
-                with open(j_path, 'r') as f:
-                    cmd_dict = json.load(f)
-                if cmd_dict.get('to_stop_training') is True:
-                    break_flag = True
-                    msg = "接收到manual cmd: stop the training!"
-                    say_sth(msg, print_out=True)
-
-        return break_flag
 
     def performance_process_SEG(self, epoch, new_value, LV):
         if epoch == 0:
@@ -1128,147 +1034,7 @@ class Seg():
 
         return new_value
 
-    def config_check(self,config_dict):
-        #----var
-        must_list = ['train_img_dir', 'model_name', 'save_dir', 'epochs']
-        # must_list = ['train_img_dir', 'test_img_dir', 'save_dir', 'epochs']
-        must_flag = True
-        default_dict = {"model_shape":[None,192,192,3],
-                        'model_name':"type_1_0",
-                        'loss_method':'ssim',
-                        'activation':'relu',
-                        'save_pb_name':'inference',
-                        'opti_method':'adam',
-                        'pool_type':['max', 'ave'],
-                        'pool_kernel':[7, 2],
-                        'embed_length':144,
-                        'learning_rate':1e-4,
-                        'batch_size':8,
-                        'ratio':1.0,
-                        'aug_times':2,
-                        'hit_target_times':2,
-                        'eval_epochs':2,
-                        'save_period':2,
-                        'kernel_list':[7,5,3,3,3],
-                        'filter_list':[32,64,96,128,256],
-                        'conv_time':1,
-                        'rot':False,
-                        'scaler':1,
-                        #'preprocess_dict':{'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
-                        }
-
-
-        #----get the must list
-        if config_dict.get('must_list') is not None:
-            must_list = config_dict.get('must_list')
-        #----collect all keys of config_dict
-        config_key_list = list(config_dict.keys())
-
-        #----check the must list
-        if config_dict.get("J_mode") is not True:
-
-            #----check of must items
-            for item in must_list:
-                if not item in config_key_list:
-                    msg = "Error: could you plz give me parameters -> {}".format(item)
-                    say_sth(msg,print_out=print_out)
-                    if must_flag is True:
-                        must_flag = False
-
-        #----parameters parsing
-        if must_flag is True:
-            #----model name
-            if config_dict.get("J_mode") is not True:
-                infer_num = config_dict['model_name'].split("_")[-1]
-                if infer_num == '0':#
-                    config_dict['infer_method'] = "AE_pooling_net"
-                else:
-                    config_dict['infer_method'] = "AE_transpose_4layer"
-
-            #----optional parameters
-            for key,value in default_dict.items():
-                if not key in config_key_list:
-                    config_dict[key] = value
-
-        return must_flag,config_dict
-
-    def get_train_qty(self,ori_qty,ratio,print_out=False,name=''):
-        if ratio is None:
-            qty_train = ori_qty
-        else:
-            if ratio <= 1.0 and ratio > 0:
-                qty_train = int(ori_qty * ratio)
-                qty_train = np.maximum(1, qty_train)
-
-        msg = "{}訓練集資料總共取數量{}".format(name,qty_train)
-        say_sth(msg, print_out=print_out)
-
-        return qty_train
-
-    def say_sth(self,msg, print_out=False):
-        if print_out:
-            print(msg)
-
-    def log_update(self,content,para_dict):
-        for key, value in para_dict.items():
-            content[key] = value
-
-        return content
-
-    def dict_update(self,main_content,add_content):
-        for key, value in add_content.items():
-            main_content[key] = value
-
-    def __img_read(self, img_path, shape,dtype='float32'):
-
-        # img = cv2.imread(img_path)
-        img = cv2.imdecode(np.fromfile(img_path, dtype=np.uint8), 1)
-        if img is None:
-            print("Read failed:",img_path)
-            return None
-        else:
-            img = cv2.resize(img,(shape[1],shape[0]))
-            img = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
-            img = img.astype(dtype)
-            img /= 255
-
-            return np.expand_dims(img,axis=0)
-
-    def __get_result_value(self,record_type,train_dict,test_dict):
-        value = None
-        if record_type == 'loss':
-            if self.test_img_dir is not None:
-                value = test_dict['loss']
-            else:
-                value = train_dict['loss']
-
-            if self.loss_method == 'ssim':
-                value = np.round(value * 100, 2)
-            else:
-                value = np.round(value, 2)
-
-        return value
-
-    def collect_data2ui(self,epoch,train_dict,test_dict):
-        #----var
-        msg_list = list()
-        header_list = list()
-        #----process
-        msg_list.append('{},{}'.format(epoch, train_dict['loss']))
-        header_list.append('train_loss')
-        # msg_list.append('{},{}'.format(epoch, train_dict['accuracy']))
-        # header_list.append('train_acc')
-        if self.test_img_dir is not None:
-            msg_list.append('{},{}'.format(epoch, test_dict['loss']))
-            header_list.append('val_loss')
-            # msg_list.append('{},{}'.format(epoch, test_dict['accuracy']))
-            # header_list.append('val_acc')
-
-
-        return msg_list,header_list
-
-
-class Pipeline_modification():
+class Seg_pipeline_modification():
     # def __init__(self):
     #     print("Pipeline_modification init")
 
@@ -1307,72 +1073,6 @@ class Pipeline_modification():
             elif p_dict.get('type') == 'RandomCrop':
                 p_dict['height'] = height
                 p_dict['width'] = width
-
-if __name__ == "__main__":
-    para_dict = dict()
-    dirs = list()
-
-
-    #----class init
-    para_dict['train_img_source'] = [
-        r"D:\dataset\optotech\CMIT_009IRC\only_OK\train\L1_OK",
-        r"D:\dataset\optotech\CMIT_009IRC\only_OK\train\L2_OK",
-        r"D:\dataset\optotech\CMIT_009IRC\only_OK\train\L4_OK",
-                ]
-    para_dict['vali_img_source'] = [
-        r'D:\dataset\optotech\CMIT_009IRC\only_OK\test\L1_OK',
-        r'D:\dataset\optotech\CMIT_009IRC\only_OK\test\L2_OK',
-        r'D:\dataset\optotech\CMIT_009IRC\only_OK\test\L4_OK',
-        ]
-    para_dict['recon_img_dir'] = r"D:\dataset\optotech\CMIT_009IRC\only_OK\recon"
-
-
-
-    #----model init
-    para_dict['model_shape'] = [None, 192, 192, 3]
-    para_dict['preprocess_dict'] = {"rot": False, 'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
-    para_dict['infer_method'] = "AE_pooling_net"#"AE_JNet"#"AE_transpose_4layer"
-    para_dict['kernel_list'] = [3,3,3,3,3]
-    # para_dict['filter_list'] = [64,96,144,192,256]
-    para_dict['filter_list'] = [32,64,96,128,256]
-    para_dict['conv_time'] = 1
-    para_dict['embed_length'] = 144
-    para_dict['scaler'] = 1
-    para_dict['pool_type'] = ['max','ave']
-    para_dict['pool_kernel'] = [5,2]
-    para_dict['activation'] = 'relu'
-    para_dict['loss_method'] = "ssim"
-    para_dict['loss_method_2'] = None
-    para_dict['opti_method'] = "adam"
-    para_dict['learning_rate'] = 1e-4
-    para_dict['save_dir'] = r"D:\code\model_saver\AE_Rot_28"
-
-
-
-    para_dict['epochs'] = 150
-    #----train
-    para_dict['eval_epochs'] = 2
-    para_dict['GPU_ratio'] = None
-    para_dict['batch_size'] = 16
-    para_dict['ratio'] = 1.0
-    para_dict['setting_dict'] = {'rdm_shift': 0.1, 'rdm_angle': 5,'rdm_patch':[0.25,0.3]}#rdm_patch:[margin_ratio,patch_ratio]
-
-    process_dict = {"rdm_flip": True, 'rdm_br': True, 'rdm_crop': False, 'rdm_blur': True,
-                    'rdm_angle': True,
-                    'rdm_noise': False,
-                    'rdm_shift': True,
-                    'rdm_patch': True,
-                    }
-
-    if True in process_dict.values():
-        pass
-    else:
-        process_dict = None
-    para_dict['process_dict'] = process_dict
-
-    AE_train = Seg(para_dict)
-    AE_train.model_init(para_dict)
-    AE_train.train(para_dict)
 
 
 

@@ -4605,7 +4605,33 @@ class ExtractSegDefect():
         return np.array(paths),len(paths)
 
 
+def read_json_NST(path,ori_dict=None):
+    re = None
+    msg_list = []
+    if not os.path.exists(path):
+        msg = "Error: the setting file does not exist: {}".format(path)
+        msg_list.append(msg)
+    else:
+        # ----decode the config file
+        ret = file_decode_v2(path, random_num_range=10, return_value=True, to_save=False)
+        if ret is None:
+            # say_sth("ret is None. The file is not secured",print_out=print_out)
+            # print("ret is None. The file is not secured")
+            with open(path, 'r', encoding='utf-8') as f:
+                config_dict = json.load(f)
+        else:
+            # say_sth("ret is not None. The file is decoded", print_out=print_out)
+            # print("ret is not None. The file is decoded")
+            config_dict = json.loads(ret.decode())
 
+        if ori_dict is not None:
+            for key,value in config_dict.items():
+                ori_dict[key] = value
+            re = ori_dict
+        else:
+            re = config_dict
+
+    return re
 
 def create_stack_img(img_list,margin=10):
     h_list = []
@@ -5582,8 +5608,13 @@ def check_results(dir_path,encript_flag=False,epoch_range=None,only2see=None):
     for key in data_name_list:
         data_dict[key] = list()
 
-    file_nums = [int(file.name.split(".")[0].split("_")[-1]) for file in os.scandir(dir_path) if
-                 file.name.find(file_name) >= 0]
+    json_paths = find_files(dir_path,file_name,find_type='filename',created_time=None)
+
+    if len(json_paths) == 0:
+        raise ValueError
+
+    file_nums = [int(file.split(".")[0].split("_")[-1]) for file in json_paths]
+
     seq = np.argsort(file_nums)
 
     #----decode files(save and overlap the original files)
@@ -5595,10 +5626,12 @@ def check_results(dir_path,encript_flag=False,epoch_range=None,only2see=None):
     #             time.sleep(0.1)
 
     for idx in seq:
-        json_path = os.path.join(dir_path,file_name + str(file_nums[idx]) + tailer)
+        json_path = json_paths[idx]
+        # json_path = os.path.join(dir_path,file_name + str(file_nums[idx]) + tailer)
 
         #----read the json file
         if os.path.exists(json_path):
+            content = read_json_NST(json_path)
             print(json_path)
             #----decode the file
             # if encript_flag is True:
@@ -5606,16 +5639,16 @@ def check_results(dir_path,encript_flag=False,epoch_range=None,only2see=None):
             #     time.sleep(2)
 
             #----read the file
-            ret = file_decode_v2(json_path, random_num_range=10,return_value=True,to_save=False)#ret is None or bytes
-
-            if ret is None:
-                print("ret is None. The file is not secured")
-                with open(json_path, 'r') as f:
-                    content = json.load(f)
-            else:
-                print("ret is not None. The file is decoded")
-                content = json.loads(ret.decode())
-            key_list = list(content.keys())
+            # ret = file_decode_v2(json_path, random_num_range=10,return_value=True,to_save=False)#ret is None or bytes
+            #
+            # if ret is None:
+            #     print("ret is None. The file is not secured")
+            #     with open(json_path, 'r') as f:
+            #         content = json.load(f)
+            # else:
+            #     print("ret is not None. The file is decoded")
+            #     content = json.loads(ret.decode())
+            # key_list = list(content.keys())
             #----encode the file
             #file_transfer(json_path)
 
@@ -6385,8 +6418,48 @@ def defect_qty_count(json_source):
     for key,value in class_qty_dict.items():
         print("{}:{}".format(key,value))
 
+def find_files(dir_path,keyword,find_type='filename',created_time=None):
+    re = list()
+
+    if os.path.exists(dir_path):
+        if find_type == 'extension':
+            paths = [file.path for file in os.scandir(dir_path) if file.name.split(".")[-1] == keyword]
+        else:
+            paths = [file.path for file in os.scandir(dir_path) if file.name.split(".")[0].find(keyword) >= 0]
+
+        if len(paths) > 0:
+            # ----get file created time
+            if created_time is not None:
+                if len(paths) == 1:
+                    re = paths
+                elif len(paths) >= 2:
+                    ctime_list = list()
+                    for path in paths:
+                        ctime_list.append(os.path.getctime(path))
+
+                    #----sequence from small to big
+                    args = np.argsort(ctime_list)
+
+                    if created_time == 'largest':
+                        re = [paths[args[-1]]]
+                    elif created_time == 'smallest':
+                        re = [paths[args[0]]]
+                    else:
+                        re = paths
+            else:
+                re = paths
+        else:
+            print("資料夾內沒有符合的檔案")
+    else:
+        print(f"資料夾不存在:{dir_path}")
+
+    return re
+
 
 if __name__ == "__main__":
+    a = True
+    b = True
+    print(np.all([a,b]))
     #----Extract Seg defects
     # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2"
     # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train"
@@ -6503,11 +6576,11 @@ if __name__ == "__main__":
     # img_mask(img_source, json_path,zoom_in_value=[75,77,88,88], img_type='path')
 
     #----check results
-    dir_path = r"D:\code\model_saver\AE_Seg_150"
+    # dir_path = r"D:\code\model_saver\Seg_3"
     # dir_path = r"C:\Users\User\Desktop\train_result"
     # dir_path = r"D:\code\model_saver\AE_Seg_139"
     # only2see = ['seg_test_defect_sensitivity_list']
-    check_results(dir_path, encript_flag=True,epoch_range=None,only2see=None)
+    # check_results(dir_path, encript_flag=True,epoch_range=None,only2see=None)
 
     #----result comparison
     # result_dict = {
