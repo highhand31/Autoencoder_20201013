@@ -4633,6 +4633,588 @@ def read_json_NST(path,ori_dict=None):
 
     return re
 
+def check_results(dir_path,epoch_range=None,only2see=None,show_parameters=False):
+
+    #----var
+    # json_path = os.path.join(dir_path,'train_result.json')
+    file_name = "train_result_"
+    plot_type = []
+    exclude_list = ['train_loss_list','train_acc_list','test_loss_list','test_acc_list','save_dir']
+    data_name_list = ['train_loss_list','test_loss_list',
+                      'train_acc_list','test_acc_list',
+                      'seg_train_loss_list','seg_test_loss_list','seg_val_loss_list'
+                      'seg_train_iou_list','seg_test_iou_list','seg_val_iou_list',
+                      'seg_train_acc_list','seg_test_acc_list','seg_val_acc_list',
+                      'seg_train_defect_recall_list','seg_test_defect_recall_list','seg_val_defect_recall_list',
+                      'seg_train_defect_sensitivity_list','seg_test_defect_sensitivity_list','seg_val_defect_sensitivity_list',
+                      ]
+    class_names = None
+    epoch_list = []
+
+    if isinstance(only2see,list):
+        data_name_list = only2see
+
+    #----plot data init
+    data_dict = dict()
+    for key in data_name_list:
+        data_dict[key] = list()
+
+    json_paths = find_files(dir_path,file_name,find_type='filename',created_time=None)
+
+    if len(json_paths) == 0:
+        raise ValueError
+
+    file_nums = [int(file.split(".")[0].split("_")[-1]) for file in json_paths]
+
+    seq = np.argsort(file_nums)
+
+    for idx in seq:
+        json_path = json_paths[idx]
+        # json_path = os.path.join(dir_path,file_name + str(file_nums[idx]) + tailer)
+
+        #----read the json file
+        if os.path.exists(json_path):
+            content = read_json_NST(json_path)
+
+            #----display info
+            if show_parameters:
+                print("--------Parameters of {}--------".format(json_path.split("\\")[-1]))
+                for k, v in content.items():
+                    if k not in data_name_list:
+                        print("{}: {}".format(k,v))
+
+            #----var parsing
+            for data_name in data_name_list:
+                if content.get(data_name) is not None:
+                    # print("data_name:",data_name)
+                    if isinstance(content[data_name],list):
+                        if len(content[data_name]) > 0:
+                            data_dict[data_name].extend(content[data_name])
+                    else:
+                        data_dict[data_name].append(content[data_name])
+
+
+    patterns = 'seg|loss|acc'
+    #----statistics
+    print("--------Statistics--------")
+    for data_name, data_list in data_dict.items():
+        if len(data_list) > 0:
+            epoch_list.append(len(data_list))
+            if data_name.find('seg') >= 0:
+                if data_name.find('loss') >= 0:
+                    arg = np.argmin(data_list)
+                    plot_type.append('seg|loss')
+                elif data_name.find('train_iou') >= 0:
+                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
+                    plot_type.append('seg|train_iou')
+                elif data_name.find('test_iou') >= 0:
+                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
+                    plot_type.append('seg|test_iou')
+                elif data_name.find('train_acc') >= 0:
+                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
+                    plot_type.append('seg|train_acc')
+                elif data_name.find('test_acc') >= 0:
+                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
+                    plot_type.append('seg|test_acc')
+                elif data_name.find('train_defect_recall') >= 0:
+                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
+                    plot_type.append('seg|train_defect_recall')
+                elif data_name.find('test_defect_recall') >= 0:
+                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
+                    plot_type.append('seg|test_defect_recall')
+                elif data_name.find('train_defect_sensitivity') >= 0:
+                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
+                    plot_type.append('seg|train_defect_sensitivity')
+                elif data_name.find('test_defect_sensitivity') >= 0:
+                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
+                    plot_type.append('seg|test_defect_sensitivity')
+            else:
+                if data_name.find('loss') >= 0:
+                    #----check if this training is AE_SEG
+                    ae_var = content.get('ae_var')
+                    if ae_var is None:
+                        loss_method = content.get('loss_method')
+                    else:
+                        loss_method = ae_var.get('loss_method')
+                    if loss_method == 'ssim':
+                        arg = np.argmax(data_list)
+                    else:
+                        arg = np.argmin(data_list)
+
+                    plot_type.append('loss')
+                elif data_name.find('acc') >= 0:
+                    arg = np.argmax(data_list)
+                    plot_type.append('acc')
+
+
+        else:
+            print("{} has no data".format(data_name))
+
+
+    #----plot loss results
+    plot_type = set(plot_type)
+    qty_plot = len(plot_type)
+    y_qty = math.ceil(qty_plot / 2)
+    if content.get('class_names') is not None:
+        class_names = content['class_names']
+        select_name = "_background_"
+        #----修改_background_名稱(因為前後下底線會讓plt不顯示)
+        if select_name in class_names:
+            idx = class_names.index(select_name)
+            class_names[idx] = "background"
+
+
+    plt.figure(num=1,figsize=(int(qty_plot * 10),int(qty_plot * 3)))
+    for idx,show_name in enumerate(plot_type):
+        if qty_plot > 1:
+            plt.subplot(y_qty, 2, idx+1)
+        #----
+        for data_name, data_list in data_dict.items():
+            if len(data_list) > 0:
+                if np.array(data_list).ndim > 1:
+                    temp_d = len(data_list[-1])
+                else:
+                    temp_d = len(data_list)
+
+                x_num_ori = [i + 1 for i in range(temp_d)]
+
+
+                if epoch_range is None:
+                    x_num = x_num_ori
+                    data_show = data_list
+                else:
+                    s = epoch_range
+                    if len(epoch_range) >= 2:
+                        x_num = x_num_ori[s[0]:s[1]]
+                        if np.array(data_list).ndim > 1:
+                            data_show = data_list[:,s[0]:s[1]]
+                        else:
+                            data_show = data_list[s[0]:s[1]]
+                    else:
+                        x_num = x_num_ori[s[0]:]
+                        if np.array(data_list).ndim > 1:
+                            data_show = data_list[:,s[0]:]
+                        else:
+                            data_show = data_list[s[0]:]
+
+                if data_name.find('seg') >= 0:
+                    if len(re.findall(show_name, data_name, re.I)) > 1:
+                        print(data_name)
+                        if len(re.findall("iou|acc|defect_recall|defect_sensitivity", data_name, re.I)) == 1:
+                            for i, value in enumerate(data_show):
+                                plt.plot(x_num, value, label=class_names[i])
+                        # if data_name.find('iou') >= 0:
+                        #     for i, iou in enumerate(data_show):
+                        #         plt.plot(x_num, iou, label=class_names[i])
+                        # elif data_name.find('acc') >= 0:
+                        #     for i, acc in enumerate(data_show):
+                        #         plt.plot(x_num, acc, label=class_names[i])
+                        # elif data_name.find('defect_recall') >= 0:
+                        #     for i, acc in enumerate(data_show):
+                        #         plt.plot(x_num, acc, label=class_names[i])
+                        else:
+                            plt.plot(x_num, data_show, label=data_name)
+                else:
+                    if data_name.find(show_name) >= 0:
+                        plt.plot(x_num, data_show, label=data_name)
+
+        plt.legend()
+        plt.ylabel(show_name)
+        plt.xlabel("epoch")
+
+    plt.show()
+
+
+    # x_num = [i+1 for i in range(len(data_dict['train_loss_list']))]
+    #
+    # plt.subplot(1, qty_plot, 1)
+    # for key in show_plot_list:
+    #     if key.find('loss') >= 0:
+    #         if len(data_dict[key]) > 0:
+    #             plt.plot(x_num, data_dict[key], label=key)
+    #
+    #
+    #
+    # # plt.plot(x_num,train_loss_list,label="train_loss")
+    # # if content["test_img_dir"] is not None:
+    # #     plt.plot(x_num, test_loss_list, label="test_loss")
+    #
+    # plt.legend()
+    # plt.ylabel("loss")
+    # plt.xlabel("epoch")
+    #
+    # #----plot acc results
+    # plt.subplot(1,qty_plot,2)
+    # for key in show_plot_list:
+    #     if key.find('acc') >= 0:
+    #         if len(data_dict[key]) > 0:
+    #             plt.plot(x_num, data_dict[key], label=key)
+    # plt.plot(x_num, train_acc_list, label="train_acc")
+    # if content["test_img_dir"] is not None:
+    #     plt.plot(x_num, test_acc_list, label="test_acc")
+    # plt.legend()
+    # # plt.ylim((0.9, 0.98))  # 限制y軸的上下限
+    # plt.ylabel("accuracy")
+    # plt.xlabel("epoch")
+
+    # if qty_plot > 2:
+    #     # ----plot overKill and undet results
+    #     plt.subplot(1, qty_plot, 3)
+    #     plt.plot(x_num, test_overKill_list, label="test_overKill")
+    #     plt.plot(x_num, test_undet_list, label="test_underKill")
+    #     plt.legend()
+    #     # plt.ylim((0.9, 0.98))  # 限制y軸的上下限
+    #     plt.ylabel("%")
+    #     plt.xlabel("epoch")
+
+
+    #----show plots
+    # plt.show()
+
+    # ----encode files
+    # if encript_flag is True:
+    #     for idx in seq:
+    #         json_path = os.path.join(dir_path, file_name + str(file_nums[idx]) + tailer)
+    #         if os.path.exists(json_path):
+    #             file_transfer(json_path)
+
+def check_results_v2(dir_path,epoch_range=None,only2see=None,show_parameters=False):
+    #Only for AE_SEG and SEG module
+
+    #----var
+    file_name = "train_result_"
+    plot_type = []
+    dataset_names = ['train','val']
+    tech_names = ['SEG','AE']
+    data_types = ['loss','iou','acc','defect_recall','defect_sensitivity']
+    data_name_list = ['train_AE_loss','val_AE_loss',
+                      'train_SEG_loss','val_SEG_loss',
+                      'train_SEG_iou','val_SEG_iou',
+                      'train_SEG_acc','val_SEG_acc',
+                      'train_SEG_defect_recall','val_SEG_defect_recall',
+                      'train_SEG_defect_sensitivity','val_SEG_defect_sensitivity',
+                      ]
+    class_names = None
+    epoch_list = []
+
+    if isinstance(only2see,list):
+        data_name_list = only2see
+
+    #----plot data init
+    data_dict = dict()
+    for key in data_name_list:
+        data_dict[key] = list()
+
+    json_paths = find_files(dir_path,file_name,find_type='filename',created_time=None)
+
+    if len(json_paths) == 0:
+        raise ValueError
+
+    file_nums = [int(file.split(".")[0].split("_")[-1]) for file in json_paths]
+
+    seq = np.argsort(file_nums)
+
+    for idx in seq:
+        json_path = json_paths[idx]
+        # json_path = os.path.join(dir_path,file_name + str(file_nums[idx]) + tailer)
+
+        #----read the json file
+        if os.path.exists(json_path):
+            content = read_json_NST(json_path)
+
+            #----display info
+            if show_parameters:
+                print("--------Parameters of {}--------".format(json_path.split("\\")[-1]))
+                for k, v in content.items():
+                    if k not in data_name_list:
+                        print("{}: {}".format(k,v))
+
+            #----var parsing
+            for data_name in data_name_list:
+                if content.get(data_name) is not None:
+                    # print("data_name:",data_name)
+                    if isinstance(content[data_name],list):
+                        if len(content[data_name]) > 0:
+                            data_dict[data_name].extend(content[data_name])
+                    else:
+                        data_dict[data_name].append(content[data_name])
+
+
+    # patterns = 'seg|loss|acc'
+    #----statistics
+    print("--------Statistics--------")
+    for data_name, data_list in data_dict.items():
+        if len(data_list) > 0:
+            epoch_list.append(len(data_list))
+            for dataset_name in dataset_names:
+                if data_name.find(dataset_name) >= 0:
+                    for tech_name in tech_names:
+                        if data_name.find(tech_name) >= 0:
+                            for data_type in data_types:
+                                if data_name.find(data_type) >= 0:
+                                    if data_type == "loss":
+                                        pass
+                                        # arg = np.argmin(data_list)
+                                        plot_type.append('{}_{}'.format(tech_name,data_type))
+                                    else:
+                                        data_dict[data_name] = np.array(data_list).astype(np.float16).T
+                                        plot_type.append('{}_{}_{}'.format(dataset_name,tech_name,data_type))
+                                    # plot_type.append(data_type)
+
+
+            # if data_name.find('SEG') >= 0:
+            #     if data_name.find('loss') >= 0:
+            #         arg = np.argmin(data_list)
+            #         plot_type.append('seg|loss')
+            #     elif data_name.find('train_iou') >= 0:
+            #         data_dict[data_name] = np.array(data_list).astype(np.float16).T
+            #         plot_type.append('seg|train_iou')
+            #     elif data_name.find('test_iou') >= 0:
+            #         data_dict[data_name] = np.array(data_list).astype(np.float16).T
+            #         plot_type.append('seg|test_iou')
+            #     elif data_name.find('train_acc') >= 0:
+            #         data_dict[data_name] = np.array(data_list).astype(np.float16).T
+            #         plot_type.append('seg|train_acc')
+            #     elif data_name.find('test_acc') >= 0:
+            #         data_dict[data_name] = np.array(data_list).astype(np.float16).T
+            #         plot_type.append('seg|test_acc')
+            #     elif data_name.find('train_defect_recall') >= 0:
+            #         data_dict[data_name] = np.array(data_list).astype(np.float16).T
+            #         plot_type.append('seg|train_defect_recall')
+            #     elif data_name.find('test_defect_recall') >= 0:
+            #         data_dict[data_name] = np.array(data_list).astype(np.float16).T
+            #         plot_type.append('seg|test_defect_recall')
+            #     elif data_name.find('train_defect_sensitivity') >= 0:
+            #         data_dict[data_name] = np.array(data_list).astype(np.float16).T
+            #         plot_type.append('seg|train_defect_sensitivity')
+            #     elif data_name.find('test_defect_sensitivity') >= 0:
+            #         data_dict[data_name] = np.array(data_list).astype(np.float16).T
+            #         plot_type.append('seg|test_defect_sensitivity')
+            # else:
+            #     if data_name.find('loss') >= 0:
+            #         #----check if this training is AE_SEG
+            #         ae_var = content.get('ae_var')
+            #         if ae_var is None:
+            #             loss_method = content.get('loss_method')
+            #         else:
+            #             loss_method = ae_var.get('loss_method')
+            #         if loss_method == 'ssim':
+            #             arg = np.argmax(data_list)
+            #         else:
+            #             arg = np.argmin(data_list)
+            #
+            #         plot_type.append('loss')
+            #     elif data_name.find('acc') >= 0:
+            #         arg = np.argmax(data_list)
+            #         plot_type.append('acc')
+
+
+        else:
+            print("{} has no data".format(data_name))
+
+
+    #----plot loss results
+    plot_type = set(plot_type)
+    qty_plot = len(plot_type)
+    # y_qty = qty_plot * 2
+    y_qty = math.ceil(qty_plot / 2)
+    if content.get('class_names') is not None:
+        class_names = content['class_names']
+    #     select_name = "_background_"
+    #     #----修改_background_名稱(因為前後下底線會讓plt不顯示)
+    #     if select_name in class_names:
+    #         idx = class_names.index(select_name)
+    #         class_names[idx] = "background"
+
+
+    plt.figure(num=1,figsize=(int(qty_plot * 10),int(qty_plot * 3)))
+    # for idx,show_name in enumerate(plot_type):
+    #     if qty_plot > 1:
+    #         plt.subplot(y_qty, 2, idx+1)
+    #     #----
+    #     for data_name, data_list in data_dict.items():
+    #         if len(data_list) > 0:
+    #             if np.array(data_list).ndim > 1:
+    #                 temp_d = len(data_list[-1])
+    #             else:
+    #                 temp_d = len(data_list)
+    #
+    #             x_num_ori = [i + 1 for i in range(temp_d)]
+    #
+    #
+    #             if epoch_range is None:
+    #                 x_num = x_num_ori
+    #                 data_show = data_list
+    #             else:
+    #                 s = epoch_range
+    #                 if len(epoch_range) >= 2:
+    #                     x_num = x_num_ori[s[0]:s[1]]
+    #                     if np.array(data_list).ndim > 1:
+    #                         data_show = data_list[:,s[0]:s[1]]
+    #                     else:
+    #                         data_show = data_list[s[0]:s[1]]
+    #                 else:
+    #                     x_num = x_num_ori[s[0]:]
+    #                     if np.array(data_list).ndim > 1:
+    #                         data_show = data_list[:,s[0]:]
+    #                     else:
+    #                         data_show = data_list[s[0]:]
+    #
+    #             if data_name.find("loss") >= 0:
+    #                 plt.plot(x_num, data_show, label=data_name)
+    #             else:
+    #                 if len(re.findall("iou|acc|defect_recall|defect_sensitivity", data_name, re.I)) == 1:
+    #                     for i, value in enumerate(data_show):
+    #                         plt.plot(x_num, value, label=class_names[i])
+    #                 # else:
+    #                 #     plt.plot(x_num, data_show, label=data_name)
+    #
+    #
+    #             # if data_name.find('SEG') >= 0:
+    #             #     if len(re.findall(show_name, data_name, re.I)) > 1:
+    #             #         print(data_name)
+    #             #         if len(re.findall("iou|acc|defect_recall|defect_sensitivity", data_name, re.I)) == 1:
+    #             #             for i, value in enumerate(data_show):
+    #             #                 plt.plot(x_num, value, label=class_names[i])
+    #             #         # if data_name.find('iou') >= 0:
+    #             #         #     for i, iou in enumerate(data_show):
+    #             #         #         plt.plot(x_num, iou, label=class_names[i])
+    #             #         # elif data_name.find('acc') >= 0:
+    #             #         #     for i, acc in enumerate(data_show):
+    #             #         #         plt.plot(x_num, acc, label=class_names[i])
+    #             #         # elif data_name.find('defect_recall') >= 0:
+    #             #         #     for i, acc in enumerate(data_show):
+    #             #         #         plt.plot(x_num, acc, label=class_names[i])
+    #             #         else:
+    #             #             plt.plot(x_num, data_show, label=data_name)
+    #             # else:
+    #             #     if data_name.find(show_name) >= 0:
+    #             #         plt.plot(x_num, data_show, label=data_name)
+    #
+    #     plt.legend()
+    #     plt.ylabel(show_name)
+    #     plt.xlabel("epoch")
+    #
+    # plt.show()
+
+
+
+    for idx,data_type in enumerate(plot_type):
+        if data_type == 'SEG_loss':
+            #----train and val in the same plot
+            plt.subplot(y_qty, 2, idx + 1)
+            for data_name, data_list in data_dict.items():
+                if data_name.find(data_type) >= 0:
+                    x_num_ori = [i + 1 for i in range(len(data_list))]
+
+                    if epoch_range is None:
+                        x_num = x_num_ori
+                        data_show = data_list
+                    else:
+                        s = epoch_range
+                        if len(epoch_range) >= 2:
+                            x_num = x_num_ori[s[0]:s[1]]
+                            data_show = data_list[s[0]:s[1]]
+                        else:
+                            x_num = x_num_ori[s[0]:]
+                            data_show = data_list[s[0]:]
+
+                    plt.plot(x_num, data_show, label=data_name)
+
+            plt.legend()
+            plt.ylabel(data_type)
+            plt.xlabel("epoch")
+        elif data_type == "AE_loss":
+            #----train and val in the same plot
+            pass
+        else:
+            #----各自一張圖
+            plt.subplot(y_qty, 2, idx + 1)
+            for data_name, data_list in data_dict.items():
+                if data_name.find(data_type) >= 0:
+                    temp_d = len(data_list[-1])
+                    x_num_ori = [i + 1 for i in range(temp_d)]
+
+                    if epoch_range is None:
+                        x_num = x_num_ori
+                        data_show = data_list
+                    else:
+                        s = epoch_range
+                        if len(epoch_range) >= 2:
+                            x_num = x_num_ori[s[0]:s[1]]
+                            data_show = data_list[:, s[0]:s[1]]
+                        else:
+                            x_num = x_num_ori[s[0]:]
+                            data_show = data_list[:,s[0]:]
+
+                    for i, value in enumerate(data_show):
+                        if class_names[i].find("background") >= 0:
+                            continue
+                        plt.plot(x_num, value, label=class_names[i])
+
+                    plt.legend()
+                    plt.ylabel(data_name)
+                    plt.xlabel("epoch")
+                    break
+
+
+    plt.show()
+
+
+
+    # x_num = [i+1 for i in range(len(data_dict['train_loss_list']))]
+    #
+    # plt.subplot(1, qty_plot, 1)
+    # for key in show_plot_list:
+    #     if key.find('loss') >= 0:
+    #         if len(data_dict[key]) > 0:
+    #             plt.plot(x_num, data_dict[key], label=key)
+    #
+    #
+    #
+    # # plt.plot(x_num,train_loss_list,label="train_loss")
+    # # if content["test_img_dir"] is not None:
+    # #     plt.plot(x_num, test_loss_list, label="test_loss")
+    #
+    # plt.legend()
+    # plt.ylabel("loss")
+    # plt.xlabel("epoch")
+    #
+    # #----plot acc results
+    # plt.subplot(1,qty_plot,2)
+    # for key in show_plot_list:
+    #     if key.find('acc') >= 0:
+    #         if len(data_dict[key]) > 0:
+    #             plt.plot(x_num, data_dict[key], label=key)
+    # plt.plot(x_num, train_acc_list, label="train_acc")
+    # if content["test_img_dir"] is not None:
+    #     plt.plot(x_num, test_acc_list, label="test_acc")
+    # plt.legend()
+    # # plt.ylim((0.9, 0.98))  # 限制y軸的上下限
+    # plt.ylabel("accuracy")
+    # plt.xlabel("epoch")
+
+    # if qty_plot > 2:
+    #     # ----plot overKill and undet results
+    #     plt.subplot(1, qty_plot, 3)
+    #     plt.plot(x_num, test_overKill_list, label="test_overKill")
+    #     plt.plot(x_num, test_undet_list, label="test_underKill")
+    #     plt.legend()
+    #     # plt.ylim((0.9, 0.98))  # 限制y軸的上下限
+    #     plt.ylabel("%")
+    #     plt.xlabel("epoch")
+
+
+    #----show plots
+    # plt.show()
+
+    # ----encode files
+    # if encript_flag is True:
+    #     for idx in seq:
+    #         json_path = os.path.join(dir_path, file_name + str(file_nums[idx]) + tailer)
+    #         if os.path.exists(json_path):
+    #             file_transfer(json_path)
+
 def create_stack_img(img_list,margin=10):
     h_list = []
     w_list = []
@@ -5571,308 +6153,7 @@ def get_4D_data_2(paths, img_shape, process_dict=None):
         batch_data /= 255
         return batch_data
 
-def check_results(dir_path,encript_flag=False,epoch_range=None,only2see=None):
 
-    #----var
-    # json_path = os.path.join(dir_path,'train_result.json')
-    file_name = "train_result_"
-    plot_type = []
-    # train_loss_list = list()
-    # test_loss_list = list()
-    # train_acc_list = list()
-    # test_acc_list = list()
-    # test_overKill_list = list()
-    # test_undet_list = list()
-    # total_train_time = 0
-    exclude_list = ['train_loss_list','train_acc_list','test_loss_list','test_acc_list','save_dir']
-    data_name_list = ['train_loss_list','test_loss_list',
-                      'train_acc_list','test_acc_list',
-                      'seg_train_loss_list','seg_test_loss_list','seg_val_loss_list'
-                      'seg_train_iou_list','seg_test_iou_list','seg_val_iou_list',
-                      'seg_train_acc_list','seg_test_acc_list','seg_val_acc_list',
-                      'seg_train_defect_recall_list','seg_test_defect_recall_list','seg_val_defect_recall_list',
-                      'seg_train_defect_sensitivity_list','seg_test_defect_sensitivity_list','seg_val_defect_sensitivity_list',
-                      ]
-    tailer = '.json'
-    qty_plot = 2
-    class_names = None
-
-    if encript_flag is True:
-        tailer = '.nst'
-
-    if isinstance(only2see,list):
-        data_name_list = only2see
-
-    #----plot data init
-    data_dict = dict()
-    for key in data_name_list:
-        data_dict[key] = list()
-
-    json_paths = find_files(dir_path,file_name,find_type='filename',created_time=None)
-
-    if len(json_paths) == 0:
-        raise ValueError
-
-    file_nums = [int(file.split(".")[0].split("_")[-1]) for file in json_paths]
-
-    seq = np.argsort(file_nums)
-
-    #----decode files(save and overlap the original files)
-    # if encript_flag is True:
-    #     for idx in seq:
-    #         json_path = os.path.join(dir_path, file_name + str(file_nums[idx]) + tailer)
-    #         if os.path.exists(json_path):
-    #             file_decode_v2(json_path,random_num_range=10)
-    #             time.sleep(0.1)
-
-    for idx in seq:
-        json_path = json_paths[idx]
-        # json_path = os.path.join(dir_path,file_name + str(file_nums[idx]) + tailer)
-
-        #----read the json file
-        if os.path.exists(json_path):
-            content = read_json_NST(json_path)
-            print(json_path)
-            #----decode the file
-            # if encript_flag is True:
-            #     file_decode_v2(json_path)
-            #     time.sleep(2)
-
-            #----read the file
-            # ret = file_decode_v2(json_path, random_num_range=10,return_value=True,to_save=False)#ret is None or bytes
-            #
-            # if ret is None:
-            #     print("ret is None. The file is not secured")
-            #     with open(json_path, 'r') as f:
-            #         content = json.load(f)
-            # else:
-            #     print("ret is not None. The file is decoded")
-            #     content = json.loads(ret.decode())
-            # key_list = list(content.keys())
-            #----encode the file
-            #file_transfer(json_path)
-
-
-            print("--------{} parameters--------".format(file_name + str(file_nums[idx])))
-            # ----display info except loss,acc
-            for key, value in content.items():
-                if key not in exclude_list:
-                    print(key, ": ", value)
-
-            #----var parsing
-            for data_name in data_name_list:
-                if content.get(data_name) is not None:
-                    print("data_name:",data_name)
-                    if isinstance(content[data_name],list):
-                        if len(content[data_name]) > 0:
-                            data_dict[data_name].extend(content[data_name])
-                    else:
-                        data_dict[data_name].append(content[data_name])
-            # if content.get('train_loss_list'):
-            #     train_loss_list.extend(content['train_loss_list'])
-            # train_acc_list.extend(content['train_acc_list'])
-            # if content["test_img_dir"] is not None:
-            #     test_loss_list.extend(content['test_loss_list'])
-            #     test_acc_list.extend(content['test_acc_list'])
-
-
-            # if content.get('total_train_time') is not None:
-            #     total_train_time += content['total_train_time']
-
-            # if "test_overKill_list" in key_list:
-            #             #     if content['test_overKill_list'] is not None:
-            #             #         test_overKill_list.extend(content['test_overKill_list'])
-            #             # if "test_undet_list" in key_list:
-            #             #     if content['test_undet_list'] is not None:
-            #             #         test_undet_list.extend(content['test_undet_list'])
-            #             #         qty_plot += 1
-
-    patterns = 'seg|loss|acc'
-    # ----statistics
-    print("--------Statistics--------")
-    for data_name, data_list in data_dict.items():
-        if len(data_list) > 0:
-            if data_name.find('seg') >= 0:
-                if data_name.find('loss') >= 0:
-                    arg = np.argmin(data_list)
-                    plot_type.append('seg|loss')
-                elif data_name.find('train_iou') >= 0:
-                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
-                    plot_type.append('seg|train_iou')
-                elif data_name.find('test_iou') >= 0:
-                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
-                    plot_type.append('seg|test_iou')
-                elif data_name.find('train_acc') >= 0:
-                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
-                    plot_type.append('seg|train_acc')
-                elif data_name.find('test_acc') >= 0:
-                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
-                    plot_type.append('seg|test_acc')
-                elif data_name.find('train_defect_recall') >= 0:
-                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
-                    plot_type.append('seg|train_defect_recall')
-                elif data_name.find('test_defect_recall') >= 0:
-                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
-                    plot_type.append('seg|test_defect_recall')
-                elif data_name.find('train_defect_sensitivity') >= 0:
-                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
-                    plot_type.append('seg|train_defect_sensitivity')
-                elif data_name.find('test_defect_sensitivity') >= 0:
-                    data_dict[data_name] = np.array(data_list).astype(np.float16).T
-                    plot_type.append('seg|test_defect_sensitivity')
-
-            else:
-                if data_name.find('loss') >= 0:
-                    #----check if this training is AE_SEG
-                    ae_var = content.get('ae_var')
-                    if ae_var is None:
-                        loss_method = content.get('loss_method')
-                    else:
-                        loss_method = ae_var.get('loss_method')
-                    if loss_method == 'ssim':
-                        arg = np.argmax(data_list)
-                    else:
-                        arg = np.argmin(data_list)
-
-                    plot_type.append('loss')
-                elif data_name.find('acc') >= 0:
-                    arg = np.argmax(data_list)
-                    plot_type.append('acc')
-
-            print("Epochs executed:", len(data_list))
-            #print("The best of {} is {} at epoch {}".format(data_name,data_list[arg], arg+1))
-        else:
-            print("{} has no data".format(data_name))
-
-
-    #----plot loss results
-    plot_type = set(plot_type)
-    qty_plot = len(plot_type)
-    y_qty = math.ceil(qty_plot / 2)
-    if content.get('class_names') is not None:
-        class_names = content['class_names']
-        select_name = "_background_"
-        #----修改_background_名稱(因為前後下底線會讓plt不顯示)
-        if select_name in class_names:
-            idx = class_names.index(select_name)
-            class_names[idx] = "background"
-
-
-    plt.figure(num=1,figsize=(int(qty_plot * 10),int(qty_plot * 3)))
-    for idx,show_name in enumerate(plot_type):
-        if qty_plot > 1:
-            plt.subplot(y_qty, 2, idx+1)
-        #----
-        for data_name, data_list in data_dict.items():
-            if len(data_list) > 0:
-                if np.array(data_list).ndim > 1:
-                    x_num_ori = [i + 1 for i in range(len(data_list[-1]))]
-                else:
-                    x_num_ori = [i + 1 for i in range(len(data_list))]
-
-
-                if epoch_range is None:
-                    x_num = x_num_ori
-                    data_show = data_list
-                else:
-                    s = epoch_range
-                    if len(epoch_range) >= 2:
-                        x_num = x_num_ori[s[0]:s[1]]
-                        if np.array(data_list).ndim > 1:
-                            data_show = data_list[:,s[0]:s[1]]
-                        else:
-                            data_show = data_list[s[0]:s[1]]
-                    else:
-                        x_num = x_num_ori[s[0]:]
-                        if np.array(data_list).ndim > 1:
-                            data_show = data_list[:,s[0]:]
-                        else:
-                            data_show = data_list[s[0]:]
-
-                if data_name.find('seg') >= 0:
-                    if len(re.findall(show_name, data_name, re.I)) > 1:
-                        print(data_name)
-                        if len(re.findall("iou|acc|defect_recall|defect_sensitivity", data_name, re.I)) == 1:
-                            for i, value in enumerate(data_show):
-                                plt.plot(x_num, value, label=class_names[i])
-                        # if data_name.find('iou') >= 0:
-                        #     for i, iou in enumerate(data_show):
-                        #         plt.plot(x_num, iou, label=class_names[i])
-                        # elif data_name.find('acc') >= 0:
-                        #     for i, acc in enumerate(data_show):
-                        #         plt.plot(x_num, acc, label=class_names[i])
-                        # elif data_name.find('defect_recall') >= 0:
-                        #     for i, acc in enumerate(data_show):
-                        #         plt.plot(x_num, acc, label=class_names[i])
-                        else:
-                            plt.plot(x_num, data_show, label=data_name)
-                else:
-                    if data_name.find(show_name) >= 0:
-                        plt.plot(x_num, data_show, label=data_name)
-
-
-
-
-
-        plt.legend()
-        plt.ylabel(show_name)
-        plt.xlabel("epoch")
-
-    plt.show()
-
-
-    # x_num = [i+1 for i in range(len(data_dict['train_loss_list']))]
-    #
-    # plt.subplot(1, qty_plot, 1)
-    # for key in show_plot_list:
-    #     if key.find('loss') >= 0:
-    #         if len(data_dict[key]) > 0:
-    #             plt.plot(x_num, data_dict[key], label=key)
-    #
-    #
-    #
-    # # plt.plot(x_num,train_loss_list,label="train_loss")
-    # # if content["test_img_dir"] is not None:
-    # #     plt.plot(x_num, test_loss_list, label="test_loss")
-    #
-    # plt.legend()
-    # plt.ylabel("loss")
-    # plt.xlabel("epoch")
-    #
-    # #----plot acc results
-    # plt.subplot(1,qty_plot,2)
-    # for key in show_plot_list:
-    #     if key.find('acc') >= 0:
-    #         if len(data_dict[key]) > 0:
-    #             plt.plot(x_num, data_dict[key], label=key)
-    # plt.plot(x_num, train_acc_list, label="train_acc")
-    # if content["test_img_dir"] is not None:
-    #     plt.plot(x_num, test_acc_list, label="test_acc")
-    # plt.legend()
-    # # plt.ylim((0.9, 0.98))  # 限制y軸的上下限
-    # plt.ylabel("accuracy")
-    # plt.xlabel("epoch")
-
-    # if qty_plot > 2:
-    #     # ----plot overKill and undet results
-    #     plt.subplot(1, qty_plot, 3)
-    #     plt.plot(x_num, test_overKill_list, label="test_overKill")
-    #     plt.plot(x_num, test_undet_list, label="test_underKill")
-    #     plt.legend()
-    #     # plt.ylim((0.9, 0.98))  # 限制y軸的上下限
-    #     plt.ylabel("%")
-    #     plt.xlabel("epoch")
-
-
-    #----show plots
-    # plt.show()
-
-    # ----encode files
-    # if encript_flag is True:
-    #     for idx in seq:
-    #         json_path = os.path.join(dir_path, file_name + str(file_nums[idx]) + tailer)
-    #         if os.path.exists(json_path):
-    #             file_transfer(json_path)
 
 def result_comparison(result_dict,extract_name_list,y_axis_list,file_name = "train_result_",encript_flag=False,
                       set_x=None):
@@ -6457,9 +6738,9 @@ def find_files(dir_path,keyword,find_type='filename',created_time=None):
 
 
 if __name__ == "__main__":
-    a = True
-    b = True
-    print(np.all([a,b]))
+    # a = True
+    # b = True
+    # print(np.all([a,b]))
     #----Extract Seg defects
     # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2"
     # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train"
@@ -6576,11 +6857,12 @@ if __name__ == "__main__":
     # img_mask(img_source, json_path,zoom_in_value=[75,77,88,88], img_type='path')
 
     #----check results
-    # dir_path = r"D:\code\model_saver\Seg_3"
+    dir_path = r"D:\code\model_saver\Seg_4"
     # dir_path = r"C:\Users\User\Desktop\train_result"
     # dir_path = r"D:\code\model_saver\AE_Seg_139"
     # only2see = ['seg_test_defect_sensitivity_list']
-    # check_results(dir_path, encript_flag=True,epoch_range=None,only2see=None)
+    # check_results(dir_path,epoch_range=None,only2see=None,show_parameters=True)
+    check_results_v2(dir_path,epoch_range=None,only2see=None,show_parameters=True)
 
     #----result comparison
     # result_dict = {

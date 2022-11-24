@@ -32,6 +32,25 @@ SockConnected = False
 img_format = {'png','PNG','jpg','JPG','JPEG','jpeg','bmp','BMP','webp','tiff','TIFF'}
 
 #----functions
+def dtype_transform(**kwargs):
+    re = dict()
+    for k, v in kwargs.items():
+        if isinstance(v, np.ndarray):
+            v = v.astype(float)
+            v = v.tolist()
+            re[k] = v
+        elif isinstance(v, list):
+            new_v = list()
+            for digit in v:
+                new_v.append(float(digit))
+            re[k] = new_v
+        # elif isinstance(v,(int,str)):
+        #     re[k] = v
+        else:
+            re[k] = v
+
+    return re
+
 def file_transfer(file_path, cut_num_range=100, random_num_range=87,header=[24, 97, 28, 98],save_name=None):
     print_out = False
     with open(file_path, 'rb') as f:
@@ -273,7 +292,7 @@ def weights_check(sess,saver,save_dir,encript_flag=True,encode_num=87,encode_hea
         # self.train_op += lookahead.get_ops()
         # print("no previous model param can be used!")
         msg = "沒有之前的權重檔，重新訓練!"
-        say_sth(msg, print_out=print_out)
+        say_sth(msg, print_out=True)
         try:
             sess.run(tf.global_variables_initializer())
         except Exception as err:
@@ -291,7 +310,7 @@ def weights_check(sess,saver,save_dir,encript_flag=True,encode_num=87,encode_hea
         data_file += '.data-00000-of-00001'
         if not os.path.exists(data_file):
             msg = "Warning:之前的權重資料檔不存在:{}，進行重新訓練!".format(data_file)
-            say_sth(msg, print_out=print_out)
+            say_sth(msg, print_out=True)
             try:
                 sess.run(tf.global_variables_initializer())
             except Exception as err:
@@ -313,7 +332,7 @@ def weights_check(sess,saver,save_dir,encript_flag=True,encode_num=87,encode_hea
             try:
                 saver.restore(sess, model_path)
                 msg = "使用之前的權重檔:{}".format(model_path)
-                say_sth(msg, print_out=print_out)
+                say_sth(msg, print_out=True)
                 # ----file encode
                 if encript_flag is True:
                     file_transfer(data_file, random_num_range=encode_num, header=encode_header)
@@ -343,7 +362,7 @@ def save_pb_file(sess,pb_save_list,pb_save_path,encode=False,random_num_range=87
         file_transfer(pb_save_path,random_num_range=random_num_range,header=header)
 
     msg = "儲存權重檔至 {}".format(pb_save_path)
-    say_sth(msg,print_out=print_out)
+    say_sth(msg,print_out=True)
 
 def encode_CKPT(model_save_path,encode_num=87,encode_header=[24, 97, 28, 98]):
     file_transfer(model_save_path + '.meta', random_num_range=encode_num, header=encode_header)
@@ -488,16 +507,34 @@ class TrainLog():
             self.content[k] = v
 
     def save(self):
-        with open(self.log_path, 'w') as f:
-            json.dump(self.content, f)
+        try:
+            with open(self.log_path, 'w') as f:
+                json.dump(self.content, f)
 
-        if self.to_encode:
-            if os.path.exists(self.log_path):
-                file_transfer(self.log_path, cut_num_range=self.cut_num_range,
-                              random_num_range=self.random_num_range)
+            if self.to_encode:
+                if os.path.exists(self.log_path):
+                    file_transfer(self.log_path, cut_num_range=self.cut_num_range,
+                                  random_num_range=self.random_num_range)
 
-        msg = "儲存訓練結果數據至{}".format(self.log_path)
-        say_sth(msg, print_out=True)
+            msg = "儲存訓練結果數據至{}".format(self.log_path)
+            say_sth(msg, print_out=True)
+        except Exception as err:
+            say_sth(err,print_out=True)
+
+class TrainDataRecord():
+    def __init__(self,**kwargs):
+        self.content = kwargs
+
+    def update(self,**kwargs):
+        key_list = list(self.content.keys())
+        for k,v in kwargs.items():
+            if k in key_list:
+                if isinstance(self.content[k],list):
+                    self.content[k].append(v)
+                else:
+                    self.content[k] = v
+            else:
+                self.content[k] = v
 
 class Seg():
     def __init__(self,para_dict,user_dict=None):
@@ -599,15 +636,23 @@ class Seg():
             record_value_seg=0
             )
         self.break_flag = False
-        self.train_loss_list = list()
-        self.seg_train_loss_list = list()
-        self.test_loss_list = list()
-        self.seg_test_loss_list = list()
 
+
+        trainData = TrainDataRecord(
+            train_SEG_loss=list(),
+            train_SEG_acc=list(),
+            train_SEG_iou=list(),
+            train_SEG_defect_recall=list(),
+            train_SEG_defect_sensitivity=list(),
+
+            val_SEG_loss=list(),
+            val_SEG_acc=list(),
+            val_SEG_iou=list(),
+            val_SEG_defect_recall=list(),
+            val_SEG_defect_sensitivity=list(),
+        )
 
         self.error_dict = {'GPU_resource_error': False}
-        keep_prob = 0.7
-
 
         #----SEG hyper-parameters
         class_names = self.classname_id_color_dict['class_names']
@@ -667,12 +712,32 @@ class Seg():
                     break
 
                 #----evaluation(SEG train set)
-                train_loss_seg, train_iou_seg, train_acc_seg,train_defect_recall,train_defect_sensitivity = \
-                    self.seg_eval_by_dataloader(dataloader_SEG_train,name='train')
+                train_eval_dict = self.seg_eval_by_dataloader(dataloader_SEG_train,name='train')
+                train_eval_dict = dtype_transform(**train_eval_dict)
+
+                #----data update
+                trainData.update(**train_eval_dict)
+                self.log.update(**trainData.content)
+
+
+                # if name == 'train':
+                #     self.seg_train_loss_list.append(float(seg_loss))
+                #     self.log.update(seg_train_loss_list=self.seg_train_loss_list)
+                #     # self.log["seg_train_loss_list"] = self.seg_train_loss_list
+                # else:
+                #     self.seg_test_loss_list.append(float(seg_loss))
+                #     self.log.update(seg_test_loss_list=self.seg_test_loss_list)
+                #     # self.log["seg_test_loss_list"] = self.seg_test_loss_list
+
 
                 #----evaluation(SEG val set)
-                test_loss_seg, test_iou_seg, test_acc_seg, test_defect_recall, test_defect_sensitivity = \
-                    self.seg_eval_by_dataloader(dataloader_SEG_val, name='test')
+                val_eval_dict = self.seg_eval_by_dataloader(dataloader_SEG_val, name='val')
+                val_eval_dict = dtype_transform(**val_eval_dict)
+
+                # ----data update
+                trainData.update(**val_eval_dict)
+                self.log.update(**trainData.content)
+
 
                 if self.break_flag:
                     self.save_ckpt_and_pb(epoch)
@@ -685,36 +750,41 @@ class Seg():
                     #----display training results
 
                     msg = "\n----訓練週期 {} 與相關結果如下----".format(epoch)
-                    say_sth(msg, print_out=print_out)
-                    display_results(None,print_out,
-                                         train_SEG_loss=train_loss_seg,
-                                         val_SEG_loss=test_loss_seg,
-                                         )
+                    say_sth(msg, print_out=self.print_out)
+                    # display_results(None,print_out,
+                    #                      train_SEG_loss=train_loss_seg,
+                    #                      val_SEG_loss=test_loss_seg,
+                    #                      )
 
-                    display_results(class_names, print_out,
-                                         train_SEG_iou=train_iou_seg,
-                                         val_SEG_iou=test_iou_seg,
-                                         train_SEG_accuracy=train_acc_seg,
-                                         val_SEG_accuracy=test_acc_seg,
-                                         train_SEG_defect_recall=train_defect_recall,
-                                         val_SEG_defect_recall=test_defect_recall,
-                                         train_SEG_defect_sensitivity=train_defect_sensitivity,
-                                         val_SEG_defect_sensitivity=test_defect_sensitivity
-                                         )
+                    display_results(class_names, self.print_out,**train_eval_dict)
+                    display_results(class_names, self.print_out,**val_eval_dict)
+
+                    # display_results(class_names, print_out,
+                    #                      train_SEG_iou=train_iou_seg,
+                    #                      val_SEG_iou=test_iou_seg,
+                    #                      train_SEG_accuracy=train_acc_seg,
+                    #                      val_SEG_accuracy=test_acc_seg,
+                    #                      train_SEG_defect_recall=train_defect_recall,
+                    #                      val_SEG_defect_recall=test_defect_recall,
+                    #                      train_SEG_defect_sensitivity=train_defect_sensitivity,
+                    #                      val_SEG_defect_sensitivity=test_defect_sensitivity
+                    #                      )
 
                     # ----send protocol data(for UI to draw)
-                    transmit_data2ui(epoch, print_out,
-                                          train_loss=train_loss_seg,
-                                          train_SEG_iou=train_iou_seg,
-                                          train_SEG_accuracy=train_acc_seg,
-                                          train_SEG_defect_recall=train_defect_recall,
-                                          train_SEG_defect_sensitivity=train_defect_sensitivity,
-                                          val_loss=test_loss_seg,
-                                          val_SEG_iou=test_iou_seg,
-                                          val_SEG_accuracy=test_acc_seg,
-                                          val_SEG_defect_recall=test_defect_recall,
-                                          val_SEG_defect_sensitivity=test_defect_sensitivity
-                                          )
+                    transmit_data2ui(epoch,self.print_out,**train_eval_dict)
+                    transmit_data2ui(epoch,self.print_out,**val_eval_dict)
+                    # transmit_data2ui(epoch, print_out,
+                    #                       train_loss=train_loss_seg,
+                    #                       train_SEG_iou=train_iou_seg,
+                    #                       train_SEG_accuracy=train_acc_seg,
+                    #                       train_SEG_defect_recall=train_defect_recall,
+                    #                       train_SEG_defect_sensitivity=train_defect_sensitivity,
+                    #                       val_loss=test_loss_seg,
+                    #                       val_SEG_iou=test_iou_seg,
+                    #                       val_SEG_accuracy=test_acc_seg,
+                    #                       val_SEG_defect_recall=test_defect_recall,
+                    #                       val_SEG_defect_sensitivity=test_defect_sensitivity
+                    #                       )
 
                     # ----prediction for selected images
                     # if self.seg_predict_qty > 0:
@@ -759,7 +829,8 @@ class Seg():
                         self.save_ckpt_and_pb(epoch)
 
                     #----record the end time
-                    self.record_time()
+                    time_dict = self.record_time()
+                    self.log.update(**time_dict)
 
                     #----save the log
                     self.log.save()
@@ -902,15 +973,15 @@ class Seg():
                     break
 
     def seg_eval_by_dataloader(self, dataloader,name='train'):
-        seg_loss = None
-        iou_seg = None
-        acc_seg = None
+        loss = None
+        iou = None
+        acc = None
         defect_recall = None
         defect_sensitivity = None
         if self.break_flag is False:
             self.seg_p.reset_arg()
             self.seg_p.reset_defect_stat()
-            seg_loss = 0
+            loss = 0
             dataloader.reset()
             for batch_paths, batch_data, batch_label in dataloader:
 
@@ -922,7 +993,7 @@ class Seg():
                 predict_label = self.sess.run(self.prediction_Seg, feed_dict=feed_dict)
 
                 #----calculate the loss and accuracy
-                seg_loss += loss_temp
+                loss += loss_temp
                 self.seg_p.cal_intersection_union(predict_label, batch_label)
                 _ = self.seg_p.cal_label_defect_by_acc_v2(predict_label, batch_label)
                 _ = self.seg_p.cal_predict_defect_by_acc_v2(predict_label, batch_label)
@@ -932,42 +1003,47 @@ class Seg():
                 if self.break_flag:
                     break
 
-            iou_seg, acc_seg, all_acc_seg = self.seg_p.cal_iou_acc(save_dict=self.log.content,name=name)
-            defect_recall = self.seg_p.cal_defect_recall(save_dict=self.log.content, name=name)
-            defect_sensitivity = self.seg_p.cal_defect_sensitivity(save_dict=self.log.content, name=name)
+            iou, acc, all_acc_seg = self.seg_p.cal_iou_acc()
+            defect_recall = self.seg_p.cal_defect_recall()
+            defect_sensitivity = self.seg_p.cal_defect_sensitivity()
 
             if self.break_flag:
-                seg_loss /= (dataloader.ite_num + 1)
+                loss /= (dataloader.ite_num + 1)
             else:
-                seg_loss /= dataloader.iterations
+                loss /= dataloader.iterations
 
             #----
-            if name == 'train':
-                self.seg_train_loss_list.append(float(seg_loss))
-                self.log.update(seg_train_loss_list=self.seg_train_loss_list)
-                # self.log["seg_train_loss_list"] = self.seg_train_loss_list
-            else:
-                self.seg_test_loss_list.append(float(seg_loss))
-                self.log.update(seg_test_loss_list=self.seg_test_loss_list)
-                # self.log["seg_test_loss_list"] = self.seg_test_loss_list
+            # if name == 'train':
+            #     self.seg_train_loss_list.append(float(seg_loss))
+            #     self.log.update(seg_train_loss_list=self.seg_train_loss_list)
+            #     # self.log["seg_train_loss_list"] = self.seg_train_loss_list
+            # else:
+            #     self.seg_test_loss_list.append(float(seg_loss))
+            #     self.log.update(seg_test_loss_list=self.seg_test_loss_list)
+            #     # self.log["seg_test_loss_list"] = self.seg_test_loss_list
 
-        return seg_loss,iou_seg,acc_seg,defect_recall,defect_sensitivity
+        return {
+            f"{name}_SEG_loss":loss,
+            f"{name}_SEG_iou":iou,
+            f"{name}_SEG_acc":acc,
+            f"{name}_SEG_defect_recall":defect_recall,
+            f"{name}_SEG_defect_sensitivity":defect_sensitivity,
+        }
 
-    def record_time(self,):
+    def record_time(self, ):
         now_time = time.time()
         d_t = now_time - self.epoch_start_time
         total_train_time = now_time - self.t_train_start
 
         self.epoch_time_list.append(d_t)
-        self.log.update(total_train_time=float(total_train_time))
-        self.log.update(ave_epoch_time=float(np.average(self.epoch_time_list)))
-        # self.log['total_train_time'] = float(total_train_time)
-        # self.log['ave_epoch_time'] = float(np.average(self.epoch_time_list))
 
         msg_list = []
         msg_list.append("此次訓練所花時間: {}秒".format(np.round(d_t, 2)))
         msg_list.append("累積訓練時間: {}秒".format(np.round(total_train_time, 2)))
         say_sth(msg_list, print_out=self.print_out, header='msg')
+
+        return dict(total_train_time=float(total_train_time),
+                    ave_epoch_time=float(np.average(self.epoch_time_list)))
 
     def set_time_start(self):
         self.epoch_time_list = list()

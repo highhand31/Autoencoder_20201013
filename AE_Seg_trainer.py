@@ -518,9 +518,9 @@ def get_user_config():
             r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\20220408新增破洞+金顆粒 資料\1\train",
             r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\20220408新增破洞+金顆粒 資料\2\train"
         ],
+
         test_img_seg_dir=[
             r'D:\dataset\optotech\silicon_division\PDAP\PD_55077\test',
-
         ],
 
         id2class_name=r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\classnames.txt",
@@ -532,11 +532,11 @@ def get_user_config():
         model_name="type_5_1",
         ae_var=ae_var,
         seg_var=seg_var,
-        epochs=2,
+        epochs=4,
         save_dir=r"D:\code\model_saver\AE_Seg_test",
-        to_fix_ae=True,#凍結AE權重不進行訓練
-        to_fix_seg=False,#凍結SEG權重不進行訓練
-        # encript_flag=True,  # 權重檔案是否進行加密
+        to_fix_ae=False,#凍結AE權重不進行訓練
+        to_fix_seg=True,#凍結SEG權重不進行訓練
+        encript_flag=False,  # 權重檔案是否進行加密
         print_out=True,  # 列印程式運行的細節訊息(通常給USER使用時設定False)
         # show_parameters=False,  # 列印使用者與template的json內容(AIE列印出config內容)
                   )

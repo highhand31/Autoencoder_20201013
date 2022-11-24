@@ -31,6 +31,25 @@ SockConnected = False
 img_format = {'png','PNG','jpg','JPG','JPEG','jpeg','bmp','BMP','webp','tiff','TIFF'}
 
 #----functions
+def dtype_transform(**kwargs):
+    re = dict()
+    for k, v in kwargs.items():
+        if isinstance(v, np.ndarray):
+            v = v.astype(float)
+            v = v.tolist()
+            re[k] = v
+        elif isinstance(v, list):
+            new_v = list()
+            for digit in v:
+                new_v.append(float(digit))
+            re[k] = new_v
+        # elif isinstance(v,(int,str)):
+        #     re[k] = v
+        else:
+            re[k] = v
+
+    return re
+
 def file_transfer(file_path, cut_num_range=100, random_num_range=87,header=[24, 97, 28, 98],save_name=None):
     print_out = False
     with open(file_path, 'rb') as f:
@@ -368,22 +387,6 @@ def create_pb_path(save_pb_name, save_dir, to_encode=False,add_name_tail=False):
 
     return os.path.join(save_dir, pb_save_path)
 
-def create_log_path(save_dir,to_encode=False,filename='train_result'):
-    count = 0
-    ext = "json"
-
-    if to_encode:
-        ext = "nst"
-
-    for i in range(1000):
-        log_path = "{}_{}.{}".format(filename, count, ext)
-        log_path = os.path.join(save_dir, log_path)
-        if not os.path.exists(log_path):
-            break
-        count += 1
-
-    return log_path
-
 def create_save_dir(save_dir):
     if isinstance(save_dir,str):
         pass
@@ -424,7 +427,9 @@ def get_paths(img_source,ext=None):
     # ----var
     paths = list()
     try:
-        if img_source is not None:
+        if img_source is None:
+            say_sth("Warning: 沒有輸入資料夾路徑",print_out=True)
+        else:
             if not isinstance(img_source, list):
                 img_source = [img_source]
 
@@ -435,14 +440,15 @@ def get_paths(img_source,ext=None):
 
             for img_dir in img_source:
                 temp = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in ext_list]
-                if len(temp) == 0:
-                    say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir))
-                else:
+                if len(temp) > 0:
                     paths.extend(temp)
+
+            #----path qty check
+            if len(paths) == 0:
+                say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir),print_out=True)
     except Exception as err:
         paths = list()
         print(f"Warning:{err}")
-
 
     return np.array(paths),len(paths)
 
@@ -457,19 +463,32 @@ def break_signal_check():
 
 def display_results(class_names,print_out,**kwargs):
     msg_list = []
-    for k,v in kwargs.items():
-            if isinstance(v,list):
-                msg_list.append(f"{k}:")
-                if class_names is not None:
-                    msg_list.append("{}:".format(class_names))
-                msg_list.append("{}".format(v))
-            else:
-                msg_list.append(f"{k}: {v}")
+    if class_names is not None:
+        msg_list.append("{}:".format(class_names))
+    for k, v in kwargs.items():
+        if isinstance(v, list):
+            msg_list.append(f"{k}:")
+            msg_list.append(f"{v}")
+        else:
+            msg_list.append(f"{k}: {v}")
 
     for msg in msg_list:
-        say_sth(msg,print_out=print_out)
+        say_sth(msg, print_out=print_out)
 
+class TrainDataRecord():
+    def __init__(self,**kwargs):
+        self.content = kwargs
 
+    def update(self,**kwargs):
+        key_list = list(self.content.keys())
+        for k,v in kwargs.items():
+            if k in key_list:
+                if isinstance(self.content[k],list):
+                    self.content[k].append(v)
+                else:
+                    self.content[k] = v
+            else:
+                self.content[k] = v
 
 class TrainLog():
     def __init__(self,save_dir,to_encode=False,filename='train_result',
@@ -526,7 +545,6 @@ class AE_Seg():
         self.print_out = para_dict.get('print_out')
         self.encript_flag = para_dict.get('encript_flag')
 
-
         #----AE process
         to_train_ae = False
         recon_flag = False
@@ -549,7 +567,7 @@ class AE_Seg():
                      AE重建圖集=self.recon_path_qty
                      ))
             recon_flag = qty_status_list[-1]
-            to_train_ae = np.all(qty_status_list)
+            to_train_ae = bool(np.sum(qty_status_list[:-1]))
 
         #----SEG process
         to_train_seg = False
@@ -573,7 +591,7 @@ class AE_Seg():
                      SEG驗證集=self.seg_test_qty,
                      # SEG預測集=self.seg_predict_qty
                      ))
-            to_train_seg = np.all(qty_status_list)
+            to_train_seg = bool(np.sum(qty_status_list))
 
             #----read class names
             classname_id_color_dict = AE_Seg_Util.get_classname_id_color_v2(id2class_name,print_out=self.print_out)
@@ -621,8 +639,6 @@ class AE_Seg():
         #----var process
         if dtype is None:
             dtype = 'float32'
-
-
 
         # ----create the dir to save model weights(CKPT, PB)
         save_dir = create_save_dir(para_dict.get('save_dir'))
@@ -919,12 +935,10 @@ class AE_Seg():
             # ----appoint PB node names
             pb_save_list.extend(['predict_Seg','dummy_out'])
 
-
         # ----pb filename(common)
         pb_save_path = create_pb_path(para_dict.get('save_pb_name'), save_dir,
                                       to_encode=self.encript_flag,
                                       add_name_tail=para_dict.get('add_name_tail'))
-
 
 
         #----save SEG coloer index image
@@ -942,9 +956,9 @@ class AE_Seg():
         #         os.makedirs(self.new_predict_dir)
 
         out_dir_prefix = os.path.join(save_dir, "model")
-        saver = tf.train.Saver(max_to_keep=2)
+        self.saver = tf.train.Saver(max_to_keep=2)
 
-        # ----create train log module
+        #----create train log module
         self.log = TrainLog(save_dir, to_encode=self.encript_flag, filename="train_result")
         self.log.update(**self.para_dict)
         self.log.update(**self.classname_id_color_dict)
@@ -955,7 +969,6 @@ class AE_Seg():
         self.model_shape = model_shape
         self.tf_input = tf_input
         self.tf_keep_prob = tf_keep_prob
-        self.saver = saver
         self.save_dir = save_dir
         self.pb_save_path = pb_save_path
         self.pb_save_list = pb_save_list
@@ -1009,12 +1022,8 @@ class AE_Seg():
             record_value_seg=0
             )
         self.break_flag = False
-        self.train_loss_list = list()
-        self.seg_train_loss_list = list()
-        self.test_loss_list = list()
-        self.seg_test_loss_list = list()
         self.error_dict = {'GPU_resource_error': False}
-        keep_prob = 0.7
+
 
         #----AE hyper-parameters
         if self.to_train_ae:
@@ -1032,6 +1041,10 @@ class AE_Seg():
                                                              pipelines=ae_var.get("val_pipelines"),
                                                              to_shuffle=False,
                                                              print_out=self.print_out)
+            train_AE_Data = TrainDataRecord(
+                train_AE_loss=list(),
+                val_AE_loss=list(),
+            )
 
         #----SEG hyper-parameters
         if self.to_train_seg:
@@ -1067,6 +1080,20 @@ class AE_Seg():
             self.seg_p = AE_Seg_Util.Seg_performance(print_out=self.print_out)
             self.seg_p.set_classname_id_color(**self.classname_id_color_dict)
 
+            train_SEG_Data = TrainDataRecord(
+                train_SEG_loss=list(),
+                train_SEG_acc=list(),
+                train_SEG_iou=list(),
+                train_SEG_defect_recall=list(),
+                train_SEG_defect_sensitivity=list(),
+
+                val_SEG_loss=list(),
+                val_SEG_acc=list(),
+                val_SEG_iou=list(),
+                val_SEG_defect_recall=list(),
+                val_SEG_defect_sensitivity=list(),
+            )
+
         self.set_time_start()
 
         #----GPU setting
@@ -1075,7 +1102,7 @@ class AE_Seg():
         # with tf.Session(config=config) as sess:
         status = weights_check(self.sess, self.saver, self.save_dir, encript_flag=self.encript_flag,
                                encode_num=self.encode_num, encode_header=self.encode_header,
-                               print_out=self.print_out)
+                               )
         if status is False:
             self.error_dict['GPU_resource_error'] = True
         elif status is True:
@@ -1095,52 +1122,36 @@ class AE_Seg():
                         self.ae_opti_by_dataloader(dataloader_AE_train)
                         if self.break_flag:
                             break
-                        # dataloader_AE_train.reset()
-                        # for batch_paths, batch_data in dataloader_AE_train:
-                        #     feed_dict = {self.tf_input: batch_data, self.tf_keep_prob: keep_prob}
-                        #     # ----optimization
-                        #     try:
-                        #         self.sess.run(self.opt_AE, feed_dict=feed_dict)
-                        #     except:
-                        #         error_dict['GPU_resource_error'] = True
-                        #         msg = "Error:權重最佳化時產生錯誤，可能GPU資源不夠導致"
-                        #         say_sth(msg, print_out=print_out)
-                        #         break_flag = True
-                        #         break
-                        #
-                        #     #----check break signal from TCPIP
-                        #     break_flag = break_signal_check()
-                        #     if break_flag:
-                        #         # self.save_ckpt_and_pb(epoch)
-                        #         break
-
-                        # say_sth("AE opti complete",print_out=True)
 
                         #----evaluation(AE train set)
-                        train_loss = self.ae_eval_by_dataloader(dataloader_AE_train,name='train')
+                        train_eval_dict = self.ae_eval_by_dataloader(dataloader_AE_train,name='train')
+
+                        #----data update
+                        train_AE_Data.update(**train_eval_dict)
+                        self.log.update(**train_AE_Data.content)
 
                         #----evaluation(validation set)
-                        test_loss = self.ae_eval_by_dataloader(dataloader_AE_val,name='test')
+                        val_eval_dict = self.ae_eval_by_dataloader(dataloader_AE_val,name='val')
+
+                        #----data update
+                        train_AE_Data.update(**val_eval_dict)
+                        self.log.update(**train_AE_Data.content)
 
                         #----display training results
                         msg = "\n----訓練週期 {} 與相關結果如下----".format(epoch)
                         say_sth(msg, print_out=self.print_out)
-                        display_results(None, self.print_out,
-                                             train_AE_loss=train_loss,
-                                             val_AE_loss=test_loss,
-                                             )
+                        display_results(None, self.print_out,**train_eval_dict)
+                        display_results(None, self.print_out,**val_eval_dict)
 
                         #----send protocol data(for UI to draw)
-                        transmit_data2ui(epoch, self.print_out,
-                                              train_AE_loss=train_loss,
-                                              val_AE_loss=test_loss,
-                                              )
+                        transmit_data2ui(epoch, self.print_out,**train_eval_dict)
+                        transmit_data2ui(epoch, self.print_out,**val_eval_dict)
 
                         #----find the best performance
-                        self.performance_process_AE(epoch, test_loss, LV)
+                        self.performance_process_AE(epoch,val_eval_dict["val_AE_loss"], LV)
 
                         #----Check if stops the training
-                        goal = self.target_comparison_AE(test_loss,loss_method=self.loss_method)
+                        goal = self.target_comparison_AE(val_eval_dict["val_AE_loss"],loss_method=self.loss_method)
                         if goal is True:
                             break
 
@@ -1216,12 +1227,19 @@ class AE_Seg():
                             break
 
                         #----evaluation(SEG train set)
-                        train_loss_seg, train_iou_seg, train_acc_seg,train_defect_recall,train_defect_sensitivity = \
-                            self.seg_eval_by_dataloader(dataloader_SEG_train,name='train')
+                        train_eval_dict = self.seg_eval_by_dataloader(dataloader_SEG_train, name='train')
+                        train_eval_dict = dtype_transform(**train_eval_dict)
 
-                        #----evaluation(SEG val set)
-                        test_loss_seg, test_iou_seg, test_acc_seg, test_defect_recall, test_defect_sensitivity = \
-                            self.seg_eval_by_dataloader(dataloader_SEG_val, name='test')
+                        # ----data update
+                        train_SEG_Data.update(**train_eval_dict)
+                        self.log.update(**train_SEG_Data.content)
+
+                        val_eval_dict = self.seg_eval_by_dataloader(dataloader_SEG_val, name='val')
+                        val_eval_dict = dtype_transform(**val_eval_dict)
+
+                        # ----data update
+                        train_SEG_Data.update(**val_eval_dict)
+                        self.log.update(**train_SEG_Data.content)
 
                         if self.break_flag is False:
                             #----find the best performance(SEG)
@@ -1232,35 +1250,39 @@ class AE_Seg():
 
                             msg = "\n----訓練週期 {} 與相關結果如下----".format(epoch)
                             say_sth(msg, print_out=self.print_out)
-                            display_results(None,self.print_out,
-                                                 train_SEG_loss=train_loss_seg,
-                                                 val_SEG_loss=test_loss_seg,
-                                                 )
-
-                            display_results(class_names, self.print_out,
-                                                 train_SEG_iou=train_iou_seg,
-                                                 val_SEG_iou=test_iou_seg,
-                                                 train_SEG_accuracy=train_acc_seg,
-                                                 val_SEG_accuracy=test_acc_seg,
-                                                 train_SEG_defect_recall=train_defect_recall,
-                                                 val_SEG_defect_recall=test_defect_recall,
-                                                 train_SEG_defect_sensitivity=train_defect_sensitivity,
-                                                 val_SEG_defect_sensitivity=test_defect_sensitivity
-                                                 )
+                            display_results(class_names, self.print_out, **train_eval_dict)
+                            display_results(class_names, self.print_out, **val_eval_dict)
+                            # display_results(None,self.print_out,
+                            #                      train_SEG_loss=train_loss_seg,
+                            #                      val_SEG_loss=test_loss_seg,
+                            #                      )
+                            #
+                            # display_results(class_names, self.print_out,
+                            #                      train_SEG_iou=train_iou_seg,
+                            #                      val_SEG_iou=test_iou_seg,
+                            #                      train_SEG_accuracy=train_acc_seg,
+                            #                      val_SEG_accuracy=test_acc_seg,
+                            #                      train_SEG_defect_recall=train_defect_recall,
+                            #                      val_SEG_defect_recall=test_defect_recall,
+                            #                      train_SEG_defect_sensitivity=train_defect_sensitivity,
+                            #                      val_SEG_defect_sensitivity=test_defect_sensitivity
+                            #                      )
 
                             # ----send protocol data(for UI to draw)
-                            transmit_data2ui(epoch, self.print_out,
-                                                  train_loss=train_loss_seg,
-                                                  train_SEG_iou=train_iou_seg,
-                                                  train_SEG_accuracy=train_acc_seg,
-                                                  train_SEG_defect_recall=train_defect_recall,
-                                                  train_SEG_defect_sensitivity=train_defect_sensitivity,
-                                                  val_loss=test_loss_seg,
-                                                  val_SEG_iou=test_iou_seg,
-                                                  val_SEG_accuracy=test_acc_seg,
-                                                  val_SEG_defect_recall=test_defect_recall,
-                                                  val_SEG_defect_sensitivity=test_defect_sensitivity
-                                                  )
+                            transmit_data2ui(epoch, self.print_out, **train_eval_dict)
+                            transmit_data2ui(epoch, self.print_out, **val_eval_dict)
+                            # transmit_data2ui(epoch, self.print_out,
+                            #                       train_loss=train_loss_seg,
+                            #                       train_SEG_iou=train_iou_seg,
+                            #                       train_SEG_accuracy=train_acc_seg,
+                            #                       train_SEG_defect_recall=train_defect_recall,
+                            #                       train_SEG_defect_sensitivity=train_defect_sensitivity,
+                            #                       val_loss=test_loss_seg,
+                            #                       val_SEG_iou=test_iou_seg,
+                            #                       val_SEG_accuracy=test_acc_seg,
+                            #                       val_SEG_defect_recall=test_defect_recall,
+                            #                       val_SEG_defect_sensitivity=test_defect_sensitivity
+                            #                       )
 
                             # ----prediction for selected images
                             # if self.seg_predict_qty > 0:
@@ -1309,19 +1331,12 @@ class AE_Seg():
                     self.save_ckpt_and_pb(epoch)
 
                 #----record the end time
-                self.record_time()
+                time_dict = self.record_time()
+                self.log.update(**time_dict)
 
                 #----save the log
                 self.log.save()
 
-                #----break the training
-                # if break_flag:
-                #     break_flag = False
-                #     break
-
-                #----error check
-                # if True in list(error_dict.values()):
-                #     break
 
         #----error messages
         if True in list(self.error_dict.values()):
@@ -1391,56 +1406,53 @@ class AE_Seg():
                     self.break_flag = True
                     break
 
-    def seg_eval_by_dataloader(self, dataloader,name='train'):
-        seg_loss = None
-        iou_seg = None
-        acc_seg = None
+    def seg_eval_by_dataloader(self, dataloader, name='train'):
+        loss = None
+        iou = None
+        acc = None
         defect_recall = None
         defect_sensitivity = None
         if self.break_flag is False:
             self.seg_p.reset_arg()
             self.seg_p.reset_defect_stat()
-            seg_loss = 0
+            loss = 0
             dataloader.reset()
             for batch_paths, batch_data, batch_label in dataloader:
 
-                feed_dict = {self.tf_input: batch_data, self.tf_input_recon: batch_data,
+                feed_dict = {self.tf_input: batch_data,
                              self.tf_label_batch: batch_label,
                              self.tf_keep_prob: 1.0,
                              self.tf_dropout: 0.0}
                 loss_temp = self.sess.run(self.loss_Seg, feed_dict=feed_dict)
                 predict_label = self.sess.run(self.prediction_Seg, feed_dict=feed_dict)
 
-                #----calculate the loss and accuracy
-                seg_loss += loss_temp
+                # ----calculate the loss and accuracy
+                loss += loss_temp
                 self.seg_p.cal_intersection_union(predict_label, batch_label)
                 _ = self.seg_p.cal_label_defect_by_acc_v2(predict_label, batch_label)
                 _ = self.seg_p.cal_predict_defect_by_acc_v2(predict_label, batch_label)
 
-                #----check the break signal
+                # ----check the break signal
                 self.break_flag = break_signal_check()
                 if self.break_flag:
                     break
 
+            iou, acc, all_acc_seg = self.seg_p.cal_iou_acc()
+            defect_recall = self.seg_p.cal_defect_recall()
+            defect_sensitivity = self.seg_p.cal_defect_sensitivity()
+
             if self.break_flag:
-                seg_loss /= (dataloader.ite_num + 1)
+                loss /= (dataloader.ite_num + 1)
             else:
-                seg_loss /= dataloader.iterations
-            iou_seg, acc_seg, all_acc_seg = self.seg_p.cal_iou_acc(save_dict=self.log.content,name=name)
-            defect_recall = self.seg_p.cal_defect_recall(save_dict=self.log.content, name=name)
-            defect_sensitivity = self.seg_p.cal_defect_sensitivity(save_dict=self.log.content, name=name)
+                loss /= dataloader.iterations
 
-            # ----
-            if name == 'train':
-                self.seg_train_loss_list.append(float(seg_loss))
-                self.log.update(seg_train_loss_list=self.seg_train_loss_list)
-                # self.log["seg_train_loss_list"] = self.seg_train_loss_list
-            else:
-                self.seg_test_loss_list.append(float(seg_loss))
-                self.log.update(seg_test_loss_list=self.seg_test_loss_list)
-                # self.log["seg_test_loss_list"] = self.seg_test_loss_list
-
-        return seg_loss,iou_seg,acc_seg,defect_recall,defect_sensitivity
+        return {
+            f"{name}_SEG_loss": loss,
+            f"{name}_SEG_iou": iou,
+            f"{name}_SEG_acc": acc,
+            f"{name}_SEG_defect_recall": defect_recall,
+            f"{name}_SEG_defect_sensitivity": defect_sensitivity,
+        }
 
     def ae_opti_by_dataloader(self, dataloader,keep_prob=0.5):
         dataloader.reset()
@@ -1483,16 +1495,9 @@ class AE_Seg():
             else:
                 loss /= dataloader.iterations
 
-            if name == "train":
-                self.train_loss_list.append(float(loss))
-                self.log.update(train_loss_list=self.train_loss_list)
-                # self.log["train_loss_list"] = loss
-            else:
-                self.test_loss_list.append(float(loss))
-                self.log.update(test_loss_list=self.test_loss_list)
-                # self.log["test_loss_list"] = loss
 
-        return loss
+
+        return {f"{name}_AE_loss":loss}
 
     def record_time(self,):
         now_time = time.time()
@@ -1500,13 +1505,14 @@ class AE_Seg():
         total_train_time = now_time - self.t_train_start
 
         self.epoch_time_list.append(d_t)
-        self.log['total_train_time'] = float(total_train_time)
-        self.log['ave_epoch_time'] = float(np.average(self.epoch_time_list))
 
         msg_list = []
         msg_list.append("此次訓練所花時間: {}秒".format(np.round(d_t, 2)))
         msg_list.append("累積訓練時間: {}秒".format(np.round(total_train_time, 2)))
         say_sth(msg_list, print_out=self.print_out, header='msg')
+
+        return dict(total_train_time=float(total_train_time),
+                    ave_epoch_time=float(np.average(self.epoch_time_list)))
 
     def set_time_start(self):
         self.epoch_time_list = list()
@@ -1663,19 +1669,6 @@ class AE_Seg():
 
         return new_value
 
-    def get_train_qty(self,ori_qty,ratio,print_out=False,name=''):
-        if ratio is None:
-            qty_train = ori_qty
-        else:
-            if ratio <= 1.0 and ratio > 0:
-                qty_train = int(ori_qty * ratio)
-                qty_train = np.maximum(1, qty_train)
-
-        msg = "{}訓練集資料總共取數量{}".format(name,qty_train)
-        say_sth(msg, print_out=print_out)
-
-        return qty_train
-
     def __img_patch_diff_method(self,img_source_1, img_source_2, sess,diff_th=30, cc_th=30):
 
         temp = np.array([1., 2., 3.])
@@ -1808,20 +1801,6 @@ class AE_Seg():
                     activation=tf.nn.relu)
         return net
 
-    def say_sth(self,msg, print_out=False):
-        if print_out:
-            print(msg)
-
-    def log_update(self,content,para_dict):
-        for key, value in para_dict.items():
-            content[key] = value
-
-        return content
-
-    def dict_update(self,main_content,add_content):
-        for key, value in add_content.items():
-            main_content[key] = value
-
     def __img_read(self, img_path, shape,dtype='float32'):
 
         # img = cv2.imread(img_path)
@@ -1836,169 +1815,6 @@ class AE_Seg():
             img /= 255
 
             return np.expand_dims(img,axis=0)
-
-    def __get_result_value(self,record_type,train_dict,test_dict):
-        value = None
-        if record_type == 'loss':
-            if self.test_img_dir is not None:
-                value = test_dict['loss']
-            else:
-                value = train_dict['loss']
-
-            if self.loss_method == 'ssim':
-                value = np.round(value * 100, 2)
-            else:
-                value = np.round(value, 2)
-
-        return value
-
-    def collect_data2ui(self,epoch,train_dict,test_dict):
-        #----var
-        msg_list = list()
-        header_list = list()
-        #----process
-        msg_list.append('{},{}'.format(epoch, train_dict['loss']))
-        header_list.append('train_loss')
-        # msg_list.append('{},{}'.format(epoch, train_dict['accuracy']))
-        # header_list.append('train_acc')
-        if self.test_img_dir is not None:
-            msg_list.append('{},{}'.format(epoch, test_dict['loss']))
-            header_list.append('val_loss')
-            # msg_list.append('{},{}'.format(epoch, test_dict['accuracy']))
-            # header_list.append('val_acc')
-
-
-        return msg_list,header_list
-
-    # def display_iou_acc(self,iou,acc,defect_recall,all_acc,id2name,name='',print_out=False):
-    # def display_results(self,id2name,print_out,dataset_name,**kwargs):
-    #     msg_list = []
-    #     class_names = list(id2name.values())
-    #     #a_dict = {'iou':iou, 'acc':acc,'defect_recall':defect_recall}
-    #     for key,value_list in kwargs.items():
-    #         if key == 'all_acc':
-    #             msg_list.append("Seg{}_all_acc: {}".format(dataset_name,value_list))
-    #         else:
-    #             msg_list.append("Seg{}_{}:".format(dataset_name,key))
-    #             msg_list.append("{}:".format(class_names))
-    #             msg_list.append("{}:".format(value_list))
-    #
-    #         # for i,value in enumerate(value_list):
-    #         #     msg_list.append(" {}: {}".format(id2name[i],value))
-    #
-    #
-    #
-    #     for msg in msg_list:
-    #         say_sth(msg,print_out=print_out)
-    # def display_results(self,class_names,print_out,**kwargs):
-    #     msg_list = []
-    #     for key,value_list in kwargs.items():
-    #             msg_list.append(f"{key}:")
-    #             if class_names is not None:
-    #                 msg_list.append("{}:".format(class_names))
-    #             msg_list.append("{}:".format(value_list))
-    #     for msg in msg_list:
-    #         say_sth(msg,print_out=print_out)
-
-    #----models
-
-    def __AE_transpose_4layer_test(self, input_x, kernel_list, filter_list,conv_time=1,maxpool_kernel=2):
-        #----var
-        maxpool_kernel = [1,maxpool_kernel,maxpool_kernel,1]
-        transpose_filter = [1, 1]
-
-        msg = '----AE_transpose_4layer_struct_2----'
-        self.say_sth(msg, print_out=self.print_out)
-
-        net = self.__Conv(input_x, kernel=kernel_list[0], filter=filter_list[0], conv_times=conv_time)
-        U_1_point = net
-        #net = tf.nn.max_pool(net, ksize=maxpool_kernel, strides=[1, 2, 2, 1], padding='SAME')
-        net = tf.layers.max_pooling2d(net,pool_size=[2,2],strides=2,padding='SAME')
-
-        msg = "encode_1 shape = {}".format(net.shape)
-        self.say_sth(msg, print_out=self.print_out)
-        # -----------------------------------------------------------------------
-        net = self.__Conv(net, kernel=kernel_list[1], filter=filter_list[1], conv_times=conv_time)
-        U_2_point = net
-        # net = tf.nn.max_pool(net, ksize=maxpool_kernel, strides=[1, 2, 2, 1], padding='SAME')
-        net = tf.layers.max_pooling2d(net, pool_size=[2, 2], strides=2, padding='SAME')
-        msg = "encode_2 shape = {}".format(net.shape)
-        self.say_sth(msg, print_out=self.print_out)
-        # -----------------------------------------------------------------------
-
-        net = self.__Conv(net, kernel=kernel_list[2], filter=filter_list[2], conv_times=conv_time)
-        U_3_point = net
-        # net = tf.nn.max_pool(net, ksize=maxpool_kernel, strides=[1, 2, 2, 1], padding='SAME')
-        net = tf.layers.max_pooling2d(net, pool_size=[2, 2], strides=2, padding='SAME')
-
-        msg = "encode_3 shape = {}".format(net.shape)
-        self.say_sth(msg, print_out=self.print_out)
-        # -----------------------------------------------------------------------
-        net = self.__Conv(net, kernel=kernel_list[3], filter=filter_list[3], conv_times=conv_time)
-        U_4_point = net
-        # net = tf.nn.max_pool(net, ksize=maxpool_kernel, strides=[1, 2, 2, 1], padding='SAME')
-        net = tf.layers.max_pooling2d(net, pool_size=[2, 2], strides=2, padding='SAME')
-
-        msg = "encode_4 shape = {}".format(net.shape)
-        self.say_sth(msg, print_out=self.print_out)
-
-        net = self.__Conv(net, kernel=kernel_list[4], filter=filter_list[4], conv_times=conv_time)
-
-
-        flatten = tf.layers.flatten(net)
-
-        embeddings = tf.nn.l2_normalize(flatten, 1, 1e-10, name='embeddings')
-        print("embeddings shape:",embeddings.shape)
-        # net = tf.layers.dense(inputs=prelogits, units=units, activation=None)
-        # print("net shape:",net.shape)
-        # net = tf.reshape(net,shape)
-        # -----------------------------------------------------------------------
-        # --------Decode--------
-        # -----------------------------------------------------------------------
-
-        # data= 4 x 4 x 64
-
-        net = tf.layers.conv2d_transpose(net, filter_list[3], transpose_filter, strides=2, padding='same')
-        #net = tf.concat([net, U_4_point], axis=3)
-        net = self.__Conv(net, kernel=kernel_list[3], filter=filter_list[3], conv_times=conv_time)
-        msg = "decode_1 shape = {}".format(net.shape)
-        self.say_sth(msg, print_out=self.print_out)
-        # -----------------------------------------------------------------------
-        # data= 8 x 8 x 64
-        net = tf.layers.conv2d_transpose(net, filter_list[2], transpose_filter, strides=2, padding='same')
-        # net = tf.concat([net, U_3_point], axis=3)
-        net = self.__Conv(net, kernel=kernel_list[2], filter=filter_list[2], conv_times=conv_time)
-        msg = "decode_2 shape = {}".format(net.shape)
-        self.say_sth(msg, print_out=self.print_out)
-        # -----------------------------------------------------------------------
-
-        net = tf.layers.conv2d_transpose(net, filter_list[1], transpose_filter, strides=2, padding='same')
-        # net = tf.concat([net, U_2_point], axis=3)
-        net = self.__Conv(net, kernel=kernel_list[1], filter=filter_list[1], conv_times=conv_time)
-        msg = "decode_3 shape = {}".format(net.shape)
-        self.say_sth(msg, print_out=self.print_out)
-        # -----------------------------------------------------------------------
-        # data= 32 x 32 x 64
-
-        net = tf.layers.conv2d_transpose(net, filter_list[0], transpose_filter, strides=2, padding='same')
-        # net = tf.concat([net, U_1_point], axis=3)
-        net = self.__Conv(net, kernel=kernel_list[0], filter=filter_list[0], conv_times=conv_time)
-        msg = "decode_2 shape = {}".format(net.shape)
-        self.say_sth(msg, print_out=self.print_out)
-
-        net = tf.layers.conv2d(
-            inputs=net,
-            filters=3,
-            kernel_size=kernel_list[0],
-            kernel_regularizer=tf.contrib.layers.l2_regularizer(scale=0.1),
-            padding="same",
-            activation=tf.nn.relu,
-            name='output_AE')
-        msg = "output shape = {}".format(net.shape)
-        self.say_sth(msg, print_out=self.print_out)
-        # -----------------------------------------------------------------------
-        # data= 64 x 64 x 3
-        return net
 
 class AE_Seg_pipeline_modification():
     # def __init__(self):
@@ -6050,72 +5866,6 @@ class AE_Seg_pipeline_modification():
 #         # -----------------------------------------------------------------------
 #         # data= 64 x 64 x 3
 #         return net
-
-if __name__ == "__main__":
-    para_dict = dict()
-    dirs = list()
-
-
-    #----class init
-    para_dict['train_img_source'] = [
-        r"D:\dataset\optotech\CMIT_009IRC\only_OK\train\L1_OK",
-        r"D:\dataset\optotech\CMIT_009IRC\only_OK\train\L2_OK",
-        r"D:\dataset\optotech\CMIT_009IRC\only_OK\train\L4_OK",
-                ]
-    para_dict['vali_img_source'] = [
-        r'D:\dataset\optotech\CMIT_009IRC\only_OK\test\L1_OK',
-        r'D:\dataset\optotech\CMIT_009IRC\only_OK\test\L2_OK',
-        r'D:\dataset\optotech\CMIT_009IRC\only_OK\test\L4_OK',
-        ]
-    para_dict['recon_img_dir'] = r"D:\dataset\optotech\CMIT_009IRC\only_OK\recon"
-
-
-
-    #----model init
-    para_dict['model_shape'] = [None, 192, 192, 3]
-    para_dict['preprocess_dict'] = {"rot": False, 'ct_ratio': 1, 'bias': 0.5, 'br_ratio': 0}
-    para_dict['infer_method'] = "AE_pooling_net"#"AE_JNet"#"AE_transpose_4layer"
-    para_dict['kernel_list'] = [3,3,3,3,3]
-    # para_dict['filter_list'] = [64,96,144,192,256]
-    para_dict['filter_list'] = [32,64,96,128,256]
-    para_dict['conv_time'] = 1
-    para_dict['embed_length'] = 144
-    para_dict['scaler'] = 1
-    para_dict['pool_type'] = ['max','ave']
-    para_dict['pool_kernel'] = [5,2]
-    para_dict['activation'] = 'relu'
-    para_dict['loss_method'] = "ssim"
-    para_dict['loss_method_2'] = None
-    para_dict['opti_method'] = "adam"
-    para_dict['learning_rate'] = 1e-4
-    para_dict['save_dir'] = r"D:\code\model_saver\AE_Rot_28"
-
-
-
-    para_dict['epochs'] = 150
-    #----train
-    para_dict['eval_epochs'] = 2
-    para_dict['GPU_ratio'] = None
-    para_dict['batch_size'] = 16
-    para_dict['ratio'] = 1.0
-    para_dict['setting_dict'] = {'rdm_shift': 0.1, 'rdm_angle': 5,'rdm_patch':[0.25,0.3]}#rdm_patch:[margin_ratio,patch_ratio]
-
-    process_dict = {"rdm_flip": True, 'rdm_br': True, 'rdm_crop': False, 'rdm_blur': True,
-                    'rdm_angle': True,
-                    'rdm_noise': False,
-                    'rdm_shift': True,
-                    'rdm_patch': True,
-                    }
-
-    if True in process_dict.values():
-        pass
-    else:
-        process_dict = None
-    para_dict['process_dict'] = process_dict
-
-    AE_train = AE_Seg(para_dict)
-    AE_train.model_init(para_dict)
-    AE_train.train(para_dict)
 
 
 

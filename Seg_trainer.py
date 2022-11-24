@@ -1,3 +1,5 @@
+import time
+
 from Seg import Seg
 
 def get_tempalte_config(**kwargs):
@@ -80,7 +82,7 @@ def get_tempalte_config(**kwargs):
         dict(type='Norm')
     ]
 
-    kernel_list = [5, 5, 3, 3, 3]
+    kernel_list = [3, 3, 3, 3, 3]
     filter_list = [32, 48, 64, 80, 96]
     stride_list = [2] * len(kernel_list)
     pool_kernel_list = [3] * len(kernel_list)
@@ -159,8 +161,8 @@ def set_user_config(**kwargs):
     # ]
 
     seg_dict['id2class_name'] = r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\classnames.txt"
-    seg_dict["epochs"] = 2
-    seg_dict["save_dir"] = r"D:\code\model_saver\Seg_3"
+    seg_dict["epochs"] = 25
+    seg_dict["save_dir"] = r"D:\code\model_saver\Seg_4"
 
     seg_dict["encript_flag"] = False
     seg_dict["print_out"] = True
@@ -176,8 +178,10 @@ if __name__ == "__main__":
     template_config = get_tempalte_config()
     user_config = set_user_config()
 
-    tech = Seg(template_config,user_dict=user_config)
-    # AE_Seg_train = AE_Seg_v2(para_dict)
-    if tech.status:
-        tech.model_init()
-        tech.train()
+    for i in range(2):
+        tech = Seg(template_config,user_dict=user_config)
+        # AE_Seg_train = AE_Seg_v2(para_dict)
+        if tech.status:
+            tech.model_init()
+            tech.train()
+            time.sleep(60)
