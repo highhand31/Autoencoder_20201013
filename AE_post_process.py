@@ -1329,7 +1329,7 @@ if __name__ == "__main__":
 
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220829_AOI_NG\real_ans\NG"
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_AOI_NG\real_ans\should_be_NG"
-    img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_矽電Label_Tidy_data\NG\origin"
+    img_source = r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\test"
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220829_AOI_NG\real_ans\low_contrast"
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220901_AOI判定OK\OK(多區OK)\num_100\low_contrast"
     # img_source = r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220818_矽電Label_Tidy_data\NG\origin\br0_ct38.25"
@@ -1372,8 +1372,8 @@ if __name__ == "__main__":
     # save_dir = r"D:\dataset\optotech\silicon_division\PDAP\PD-55077GR-AP Al用照片\背面\19BR262E04\02\results_544x832"
     save_dir = img_source
 
-    diff_th = 10
-    cc_th = 10
+    diff_th = 30
+    cc_th = 40
 
     img_ori2process = False
     img_ori_p_args = ['gau_blur',(3,3)]  # [process_type,kernel]

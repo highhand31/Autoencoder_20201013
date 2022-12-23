@@ -93,6 +93,8 @@ def get_AE_arg(**kwargs):
 
 def get_SEG_arg(**kwargs):
     # ----SEG
+    height = 544
+    width = 832
     seg_var = dict()
     hole_dict = dict(
         defect_num=1,
@@ -528,11 +530,13 @@ def get_user_config():
     )
 
     para_dict = dict(
-        model_shape=[None, height, width, 3],
+        # model_shape=[None, height, width, 3],
+        height=height,
+        width=width,
         model_name="type_5_1",
         ae_var=ae_var,
         seg_var=seg_var,
-        epochs=4,
+        epochs=1,
         save_dir=r"D:\code\model_saver\AE_Seg_test",
         to_fix_ae=False,#凍結AE權重不進行訓練
         to_fix_seg=True,#凍結SEG權重不進行訓練

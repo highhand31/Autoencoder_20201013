@@ -419,9 +419,7 @@ def Seg_pooling_net_V8(tf_input,tf_input_2,encode_dict,decode_dict,out_channel=3
 
 def Seg_pooling_net_V1(tf_input,encode_dict,decode_dict,out_channel=3,print_out=False):
 
-    '''
-    adopted from Seg_pooling_net_V4
-    '''
+
     #----var
     net_list = list()
     transpose_list = list()

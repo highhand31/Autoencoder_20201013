@@ -1524,17 +1524,18 @@ if __name__ == "__main__":
         "0.0.4":r"D:\code\model_saver\AE_Seg_144_2\infer_best_epoch61.nst",
     }
 
-    # img_dir_list = [
-    #     r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\20221004_AOI_extract_NG\26BR023E01",
-    #     r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\20221004_AOI_extract_NG\26BR023E02",
-    #
-    #     # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
-    #     # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
-    #     # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2",
-    #     # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20221102_0.0.4版效果不好的圖"
-    # ]
-    root_dir = r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\20221004_AOI_extract_NG"
-    img_dir_list = [obj.path for obj in os.scandir(root_dir) if obj.is_dir()]
+    img_dir_list = [
+        # r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\20221004_AOI_extract_NG\26BR023E01",
+        # r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\20221004_AOI_extract_NG\26BR023E02",
+
+        # r'D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\train',
+        r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\test"
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\1",
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20220408新增破洞+金顆粒 資料\2",
+        # r"D:\dataset\optotech\silicon_division\PDAP\破洞_金顆粒_particle\20221102_0.0.4版效果不好的圖"
+    ]
+    # root_dir = r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\20221004_AOI_extract_NG"
+    # img_dir_list = [obj.path for obj in os.scandir(root_dir) if obj.is_dir()]
 
     pb_path = ver_pb_dict['0.0.5']
 
@@ -1563,7 +1564,7 @@ if __name__ == "__main__":
     #                      )
     # infer_speed_test(img_dir, pb_path, node_dict,batch_size=1,set_img_num=1000)
 
-    compare_with_answers = False
+    compare_with_answers = True
     img_save_dict = {
         'to_save_predict_image': True,
         'img_compare_with_ori': True,
@@ -1574,7 +1575,7 @@ if __name__ == "__main__":
     }
 
     threshold_dict = {
-        'prob_threshold': 0.8,
+        'prob_threshold': 0.9,
         'cc_th': None,
         'acc_threshold': 0.3,
     }

@@ -474,6 +474,22 @@ def display_results(class_names,print_out,**kwargs):
     for msg in msg_list:
         say_sth(msg,print_out=print_out)
 
+def path_qty_process(imgDirPathDict):
+    msg_list = []
+    status_list = []
+    for img_dir_name,qty in imgDirPathDict.items():
+        if qty == 0:
+            msg = f"{img_dir_name}沒有圖片"
+            stat = False
+        else:
+            msg = "{}圖片數量:{}".format(img_dir_name,qty)
+            stat = True
+        msg_list.append(msg)
+        status_list.append(stat)
+    say_sth(msg_list,print_out=True)
+
+    return status_list
+
 class TrainLog():
     def __init__(self,save_dir,to_encode=False,filename='train_result',
                  cut_num_range=30,random_num_range=10):
@@ -561,7 +577,7 @@ class Seg():
         self.seg_test_paths, self.seg_test_qty = get_paths(test_img_seg_dir)
         # self.seg_predict_paths, self.seg_predict_qty = get_paths(predict_img_dir)
 
-        qty_status_list = self.path_qty_process(
+        qty_status_list = path_qty_process(
             dict(SEG訓練集=self.seg_train_qty,
                  SEG驗證集=self.seg_test_qty,
                  # SEG預測集=self.seg_predict_qty
@@ -591,7 +607,7 @@ class Seg():
         # ----create the dir to save model weights(CKPT, PB)
         save_dir = create_save_dir(self.para_dict['save_dir'])
 
-        # ----pb filename(common)
+        # ----create pb path
         pb_save_path = create_pb_path(self.para_dict.get('save_pb_name'), save_dir,
                                       to_encode=self.encript_flag,add_name_tail=self.para_dict.get('add_name_tail'))
 
@@ -607,7 +623,7 @@ class Seg():
         self.log.update(**self.classname_id_color_dict)
         self.log.update(pb_save_list=self.pb_save_list)
 
-        # ----local var to global
+        #----local var to global
         self.save_dir = save_dir
         self.pb_save_path = pb_save_path
         # self.pb_extension = pb_extension
@@ -1063,22 +1079,6 @@ class Seg():
                 self.seg_train_qty += select_num
                 msg = f"SEG額外加入AE的OK圖片進行訓練，SEG訓練集圖片集數量增加後為{self.seg_train_qty}"
                 say_sth(msg,print_out=self.print_out)
-
-    def path_qty_process(self,imgDirPathDict):
-        msg_list = []
-        status_list = []
-        for img_dir_name,qty in imgDirPathDict.items():
-            if qty == 0:
-                msg = f"{img_dir_name}沒有圖片"
-                stat = False
-            else:
-                msg = "{}圖片數量:{}".format(img_dir_name,qty)
-                stat = True
-            msg_list.append(msg)
-            status_list.append(stat)
-        say_sth(msg_list,print_out=self.print_out)
-
-        return status_list
 
     def performance_process_SEG(self, epoch, new_value, LV):
         if epoch == 0:

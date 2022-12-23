@@ -475,6 +475,40 @@ def display_results(class_names,print_out,**kwargs):
     for msg in msg_list:
         say_sth(msg, print_out=print_out)
 
+def model_shape_process(para_dict):
+    model_shape = para_dict.get('model_shape')
+    if model_shape is None:
+        model_shape = [None]
+        size_names = ['height','width','channel']
+        defaults = [128, 128, 3]
+        for name, default in zip(size_names,defaults):
+            if isinstance(para_dict.get(name),int):
+                value = para_dict[name]
+            else:
+                value = default
+
+            model_shape.append(value)
+
+    print("model shape process:",model_shape)
+
+    return model_shape
+
+def path_qty_process(imgDirPathDict):
+    msg_list = []
+    status_list = []
+    for img_dir_name,qty in imgDirPathDict.items():
+        if qty == 0:
+            msg = f"{img_dir_name}沒有圖片"
+            stat = False
+        else:
+            msg = "{}圖片數量:{}".format(img_dir_name,qty)
+            stat = True
+        msg_list.append(msg)
+        status_list.append(stat)
+    say_sth(msg_list,print_out=True)
+
+    return status_list
+
 class TrainDataRecord():
     def __init__(self,**kwargs):
         self.content = kwargs
@@ -560,7 +594,7 @@ class AE_Seg():
             self.test_paths, self.test_path_qty = get_paths(test_img_dir)
             # self.sp_paths, self.sp_path_qty = get_paths(special_img_dir)
             self.recon_paths, self.recon_path_qty = get_paths(recon_img_dir)
-            qty_status_list = self.path_qty_process(
+            qty_status_list = path_qty_process(
                 dict(AE訓練集=self.train_path_qty,
                      AE驗證集=self.test_path_qty,
                      # AE加強學習集=self.sp_path_qty,
@@ -586,7 +620,7 @@ class AE_Seg():
             self.seg_test_paths, self.seg_test_qty = get_paths(test_img_seg_dir)
             # self.seg_predict_paths, self.seg_predict_qty = get_paths(predict_img_dir)
 
-            qty_status_list = self.path_qty_process(
+            qty_status_list = path_qty_process(
                 dict(SEG訓練集=self.seg_train_qty,
                      SEG驗證集=self.seg_test_qty,
                      # SEG預測集=self.seg_predict_qty
@@ -626,7 +660,7 @@ class AE_Seg():
         para_dict = self.para_dict
 
         #----common var
-        model_shape = para_dict.get('model_shape')
+        model_shape = model_shape_process(para_dict)
         preprocess_dict = para_dict.get('preprocess_dict')
         lr = para_dict['learning_rate']
         dtype = para_dict.get('dtype')
@@ -1577,22 +1611,6 @@ class AE_Seg():
                 msg = f"SEG額外加入AE的OK圖片進行訓練，SEG訓練集圖片集數量增加後為{self.seg_train_qty}"
                 say_sth(msg,print_out=self.print_out)
 
-    def path_qty_process(self,imgDirPathDict):
-        msg_list = []
-        status_list = []
-        for img_dir_name,qty in imgDirPathDict.items():
-            if qty == 0:
-                msg = f"{img_dir_name}沒有圖片"
-                stat = False
-            else:
-                msg = "{}圖片數量:{}".format(img_dir_name,qty)
-                stat = True
-            msg_list.append(msg)
-            status_list.append(stat)
-        say_sth(msg_list,print_out=self.print_out)
-
-        return status_list
-
     def read_manual_cmd(self,to_read_manual_cmd):
         break_flag = False
         if to_read_manual_cmd:
@@ -1831,7 +1849,7 @@ class AE_Seg_pipeline_modification():
     def __modify_type_5__(self,config_dict):
         dict_list = ['ae_var','seg_var']
         key_list = ["train_pipelines","val_pipelines"]
-        model_shape = config_dict.get('model_shape')
+        model_shape = model_shape_process(config_dict)
 
         h,w = model_shape[1:3]
 

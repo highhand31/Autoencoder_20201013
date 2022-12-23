@@ -4894,8 +4894,10 @@ def check_results_v2(dir_path,epoch_range=None,only2see=None,show_parameters=Fal
                       'train_SEG_defect_recall','val_SEG_defect_recall',
                       'train_SEG_defect_sensitivity','val_SEG_defect_sensitivity',
                       ]
+    epoch_check_name = ['train_AE_loss','train_SEG_loss']
     class_names = None
     epoch_list = []
+    execute_epochs = 0
 
     if isinstance(only2see,list):
         data_name_list = only2see
@@ -4939,10 +4941,18 @@ def check_results_v2(dir_path,epoch_range=None,only2see=None,show_parameters=Fal
                     else:
                         data_dict[data_name].append(content[data_name])
 
+            #----get epochs of all json files
+            for key in epoch_check_name:
+                if isinstance(content.get(key),list):
+                    execute_epochs += len(content[key])
+                    break
+
+
 
     # patterns = 'seg|loss|acc'
     #----statistics
     print("--------Statistics--------")
+    print("共進行了{} epochs".format(execute_epochs))
     for data_name, data_list in data_dict.items():
         if len(data_list) > 0:
             epoch_list.append(len(data_list))
@@ -5098,9 +5108,8 @@ def check_results_v2(dir_path,epoch_range=None,only2see=None,show_parameters=Fal
     # plt.show()
 
 
-
     for idx,data_type in enumerate(plot_type):
-        if data_type == 'SEG_loss':
+        if data_type == 'SEG_loss' or data_type == 'AE_loss':
             #----train and val in the same plot
             plt.subplot(y_qty, 2, idx + 1)
             for data_name, data_list in data_dict.items():
@@ -5124,9 +5133,6 @@ def check_results_v2(dir_path,epoch_range=None,only2see=None,show_parameters=Fal
             plt.legend()
             plt.ylabel(data_type)
             plt.xlabel("epoch")
-        elif data_type == "AE_loss":
-            #----train and val in the same plot
-            pass
         else:
             #----各自一張圖
             plt.subplot(y_qty, 2, idx + 1)
@@ -5392,20 +5398,42 @@ def log_update(content,para_dict):
 
     return content
 
-def get_paths(img_source):
+def get_paths(img_source,ext=None,to_read_subdirs=False):
     # ----var
     paths = list()
-    if not isinstance(img_source, list):
-        img_source = [img_source]
-
-    for img_dir in img_source:
-        temp = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in img_format]
-        if len(temp) == 0:
-            say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir))
+    try:
+        if img_source is None:
+            say_sth("Warning: 沒有輸入資料夾路徑",print_out=True)
         else:
-            paths.extend(temp)
+            if not isinstance(img_source, list):
+                img_source = [img_source]
 
-    return np.array(paths), len(paths)
+            if isinstance(ext,str):
+                ext_list = [ext]
+            else:
+                ext_list = img_format
+
+            for img_dir in img_source:
+                if to_read_subdirs:
+                    temp = []
+                    dirs = [obj.path for obj in os.scandir(img_dir) if obj.is_dir()]
+                    for subdir in dirs:
+                        p = [file.path for file in os.scandir(subdir) if file.name.split(".")[-1] in ext_list]
+                        if len(p) > 0:
+                            temp.extend(p)
+                else:
+                    temp = [file.path for file in os.scandir(img_dir) if file.name.split(".")[-1] in ext_list]
+                if len(temp) > 0:
+                    paths.extend(temp)
+
+            #----path qty check
+            if len(paths) == 0:
+                say_sth("Warning:沒有找到支援的圖片檔案:{}".format(img_dir),print_out=True)
+    except Exception as err:
+        paths = list()
+        print(f"Warning:{err}")
+
+    return np.array(paths),len(paths)
 
 def get_label_dict(img_dir):
     #----var
@@ -6153,8 +6181,6 @@ def get_4D_data_2(paths, img_shape, process_dict=None):
         batch_data /= 255
         return batch_data
 
-
-
 def result_comparison(result_dict,extract_name_list,y_axis_list,file_name = "train_result_",encript_flag=False,
                       set_x=None):
     #----var
@@ -6736,8 +6762,74 @@ def find_files(dir_path,keyword,find_type='filename',created_time=None):
 
     return re
 
+def save_files_with_english(img_dir,ext=None,prefix='img'):
+    use_existed = False
+    paths,qty = get_paths(img_dir,ext=ext)
+    if qty > 0:
+        #----var
+        ori_name2_new_dict = dict()
+        new2ori_name_dict = dict()
+
+        #----create the save folder
+        save_dir = os.path.join(img_dir,"rename_files")
+        if os.path.exists(save_dir):
+            json_names = ["ori_name2_new_dict.json", "new2ori_name_dict.json"]
+
+
+            for i,json_name in enumerate(json_names):
+                json_path = os.path.join(save_dir,json_name)
+                if os.path.exists(json_path):
+                    with open(json_path,'r') as f:
+                        if i == 0:
+                            ori_name2_new_dict = json.load(f)
+                        else:
+                            new2ori_name_dict = json.load(f)
+                        use_existed = True
+        else:
+            os.makedirs(save_dir)
+
+        #basename = prefix + "_num_"
+
+        for i,path in enumerate(paths):
+            ori_splits = path.split("\\")[-1].split(".")
+            ori_ext = ori_splits[-1]
+            ori_name = ori_splits[0]
+            if use_existed:
+                new_name = ori_name2_new_dict.get(ori_name)
+                if new_name is None:
+                    use_existed = False
+
+            if use_existed is False:
+                new_name = "{}_num_{}".format(prefix,i)
+                ori_name2_new_dict[ori_name] = new_name
+                new2ori_name_dict[new_name] = ori_name
+
+            new_path = "{}.{}".format(new_name,ori_ext)
+            new_path = os.path.join(save_dir,new_path)
+
+            shutil.copy(path,new_path)
+
+        #----save_change dict
+        data = {
+            "ori_name2_new_dict.json":ori_name2_new_dict,
+            "new2ori_name_dict.json":new2ori_name_dict
+        }
+        for key,value in data.items():
+            with open(os.path.join(save_dir,key),'w') as f:
+                json.dump(value,f)
+
+
+
+
+
 
 if __name__ == "__main__":
+    #----save_files_with_english
+    # img_dir = r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\train"
+    img_dir = r"D:\dataset\optotech\silicon_division\PDAP\PD_55077\test"
+    prefix = "PD_55077"
+    save_files_with_english(img_dir, ext='json', prefix=prefix)
+
     # a = True
     # b = True
     # print(np.all([a,b]))
@@ -6857,12 +6949,12 @@ if __name__ == "__main__":
     # img_mask(img_source, json_path,zoom_in_value=[75,77,88,88], img_type='path')
 
     #----check results
-    dir_path = r"D:\code\model_saver\Seg_4"
+    # dir_path = r"D:\code\model_saver\AE_test"
     # dir_path = r"C:\Users\User\Desktop\train_result"
     # dir_path = r"D:\code\model_saver\AE_Seg_139"
     # only2see = ['seg_test_defect_sensitivity_list']
     # check_results(dir_path,epoch_range=None,only2see=None,show_parameters=True)
-    check_results_v2(dir_path,epoch_range=None,only2see=None,show_parameters=True)
+    # check_results_v2(dir_path,epoch_range=None,only2see=None,show_parameters=True)
 
     #----result comparison
     # result_dict = {
